@@ -1,0 +1,21 @@
+node_modules/
+release/
+tmp-check/
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+*.log
+*.tmp
+*.bak
+
+dist/
+build/
+
+.DS_Store
+Thumbs.db
+
+# User data lives outside this project, but keep this here as a guard.
+DustySearchData/
+self-check-result.json
