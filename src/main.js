@@ -536,6 +536,7 @@ function searchIndexItems(index, query, mode, maxResults) {
         title: item.title,
         path: item.path,
         detail: contentScore > 0 ? makePreview(item.content, query, item.dir) : item.dir,
+        matchReason: contentScore > 0 ? '正文里包含关键词' : '文件名或路径包含关键词',
         size: item.size,
         updatedAt: item.updatedAt,
         score
@@ -602,6 +603,7 @@ async function walkFiles(root, query, settings, results, startedAt, mode = 'all'
         title: entry.name,
         path: fullPath,
         detail: preview || path.dirname(fullPath),
+        matchReason: contentScore > 0 ? '正文里包含关键词' : '文件名或路径包含关键词',
         size: stat.size,
         updatedAt: stat.mtime,
         score: total
@@ -642,6 +644,7 @@ function searchMemory(query) {
   return (db.memory || [])
     .map((item) => ({
       ...item,
+      matchReason: '记忆库标题、来源或内容包含关键词',
       score: scoreText(`${item.title} ${item.source} ${item.content}`, query)
     }))
     .filter((item) => item.score > 0)
