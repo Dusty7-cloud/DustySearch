@@ -16,7 +16,7 @@ const MODE_LABELS = {
   local: '本地文件名',
   content: '正文检索',
   memory: '记忆库',
-  web: '联网结果'
+  web: '网页摘要'
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -224,6 +224,14 @@ function renderFailures() {
   `).join('');
 }
 
+function getMatchReason(item, mode) {
+  if (item.bucket === '网页摘要') return '来自网页摘要匹配';
+  if (item.bucket === '记忆库') return '来自已导入的记忆库';
+  if (mode === 'content') return item.matchReason || '正文里包含关键词';
+  if (mode === 'local') return item.matchReason || '文件名或路径包含关键词';
+  return item.matchReason || (item.detail && item.detail !== item.path ? '内容或文件名包含关键词' : '文件名或路径包含关键词');
+}
+
 function setActiveMode(mode) {
   state.activeMode = mode;
   $$('.mode-button').forEach((button) => button.classList.toggle('active', button.dataset.mode === mode));
@@ -235,7 +243,7 @@ function renderResults(payload, mode = state.activeMode) {
   const memory = payload.memory || [];
   const web = payload.web || [];
   const all = [
-    ...web.map((item) => ({ ...item, bucket: '联网结果' })),
+    ...web.map((item) => ({ ...item, bucket: '网页摘要' })),
     ...memory.map((item) => ({ ...item, bucket: '记忆库' })),
     ...local.map((item) => ({ ...item, bucket: mode === 'content' ? '正文结果' : '本地文件' }))
   ];
@@ -255,11 +263,13 @@ function renderResults(payload, mode = state.activeMode) {
     const meta = isFile
       ? `${formatSize(item.size)} · ${formatDate(item.updatedAt)}`
       : `${item.bucket} · ${formatDate(item.createdAt)}`;
+    const reason = getMatchReason(item, mode);
 
     return `
       <article class="result-card ${item.type === 'web-fallback' ? 'result-card-muted' : ''}">
         <div class="result-type">${item.bucket}</div>
         <h3>${highlight(item.title)}</h3>
+        <div class="match-reason">${escapeHtml(reason)}</div>
         <p>${highlight(item.detail || item.content?.slice(0, 260) || source)}</p>
         <div class="result-meta">${escapeHtml(source)}<br>${meta}</div>
         ${isFile ? `
