@@ -1,0 +1,28 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('dustySearch', {
+  getState: () => ipcRenderer.invoke('app:getState'),
+  searchAll: (query) => ipcRenderer.invoke('search:all', query),
+  searchLocalName: (query) => ipcRenderer.invoke('search:localName', query),
+  searchContent: (query) => ipcRenderer.invoke('search:content', query),
+  searchMemoryOnly: (query) => ipcRenderer.invoke('search:memory', query),
+  searchWebResults: (query) => ipcRenderer.invoke('search:webResults', query),
+  searchWeb: (query) => ipcRenderer.invoke('search:web', query),
+  rebuildIndex: () => ipcRenderer.invoke('index:rebuild'),
+  openItem: (targetPath) => ipcRenderer.invoke('item:open', targetPath),
+  showItem: (targetPath) => ipcRenderer.invoke('item:show', targetPath),
+  copyText: (text) => ipcRenderer.invoke('text:copy', text),
+  pickFolder: () => ipcRenderer.invoke('folder:pick'),
+  pickImportFiles: () => ipcRenderer.invoke('file:pickImport'),
+  importSite: (url) => ipcRenderer.invoke('site:import', url),
+  saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
+  deleteMemory: (id) => ipcRenderer.invoke('memory:delete', id),
+  updateMemoryMeta: (payload) => ipcRenderer.invoke('memory:updateMeta', payload),
+  clearHistory: () => ipcRenderer.invoke('history:clear'),
+  clearFailures: () => ipcRenderer.invoke('failures:clear'),
+  openDataDir: () => ipcRenderer.invoke('data:openDir'),
+  openInstallDir: () => ipcRenderer.invoke('app:openInstallDir'),
+  createBackup: () => ipcRenderer.invoke('backup:create'),
+  restoreBackup: () => ipcRenderer.invoke('backup:restore'),
+  exportMemory: (format) => ipcRenderer.invoke('backup:exportMemory', format)
+});

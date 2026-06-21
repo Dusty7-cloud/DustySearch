@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DustySearch</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">D</div>
+          <div>
+            <div class="brand-name">DustySearch</div>
+            <div class="brand-subtitle">本地 · 正文 · 联网 · 记忆库</div>
+          </div>
+        </div>
+        <nav class="nav">
+          <button class="nav-item active" data-tab="search">检索</button>
+          <button class="nav-item" data-tab="memory">记忆库</button>
+          <button class="nav-item" data-tab="import">导入</button>
+          <button class="nav-item" data-tab="settings">设置</button>
+        </nav>
+        <div class="sidebar-foot">
+          <div class="mini-label">数据位置</div>
+          <button id="openDataDir" class="quiet-button">打开资料夹</button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <section id="tab-search" class="tab-panel active">
+          <header class="topbar">
+            <div>
+              <h1>检索中心</h1>
+              <p>先输入关键词，再选择你要搜哪里。需要全都搜时再点“综合检索”。</p>
+            </div>
+          </header>
+
+          <div class="search-box split-search">
+            <input id="queryInput" type="search" placeholder="输入关键词，比如：准考证、课程、笔记、网址标题" />
+            <button id="searchAllButton">综合检索</button>
+          </div>
+
+          <div class="mode-buttons">
+            <button class="mode-button" data-mode="local">本地文件名</button>
+            <button class="mode-button" data-mode="content">正文检索</button>
+            <button class="mode-button" data-mode="memory">记忆库</button>
+            <button class="mode-button" data-mode="web">联网结果</button>
+            <button class="mode-button secondary-mode" data-mode="open-web">打开浏览器</button>
+          </div>
+
+          <div class="tool-row">
+            <button id="rebuildIndex" class="small-button">刷新本地索引</button>
+            <span id="indexStatus">文件有新增或改名时，点这里更新本地目录。</span>
+          </div>
+
+          <div class="status-row">
+            <span id="statusText">准备好了。</span>
+            <span id="dataPath"></span>
+          </div>
+
+          <div class="content-grid">
+            <section class="panel results-panel">
+              <div class="panel-head">
+                <h2 id="resultsTitle">匹配结果</h2>
+                <span id="resultCount">0 条</span>
+              </div>
+              <div id="resultsList" class="list empty">输入关键词后，选择一个检索按钮。</div>
+            </section>
+
+            <section class="panel history-panel">
+              <div class="panel-head">
+                <h2>检索历史</h2>
+                <button id="clearHistory" class="small-button">清空</button>
+              </div>
+              <div id="historyList" class="history-list empty">还没有记录。</div>
+            </section>
+          </div>
+        </section>
+
+        <section id="tab-memory" class="tab-panel">
+          <header class="topbar">
+            <div>
+              <h1>记忆库</h1>
+              <p>导入过的文件和网站内容会存在这里，之后可以单独检索。</p>
+            </div>
+          </header>
+          <div class="memory-tools">
+            <select id="memoryCategoryFilter">
+              <option value="">全部分类</option>
+            </select>
+            <input id="memoryTagFilter" type="search" placeholder="按标签筛选，比如：课程、证件、项目" />
+          </div>
+          <div id="memoryTagCloud" class="tag-cloud"></div>
+          <div id="memoryList" class="memory-list empty">还没有导入内容。</div>
+        </section>
+
+        <section id="tab-import" class="tab-panel">
+          <header class="topbar">
+            <div>
+              <h1>导入资料</h1>
+              <p>把常用文件或网页放进记忆库，之后可以单独按“记忆库”检索。</p>
+            </div>
+          </header>
+          <div class="import-grid">
+            <div class="panel import-panel">
+              <h2>导入文件</h2>
+              <p>支持 txt、md、pdf、docx、xlsx、csv、网页文件等常见资料。</p>
+              <button id="importFiles">选择文件导入</button>
+            </div>
+            <div class="panel import-panel">
+              <h2>导入网站</h2>
+              <p>粘贴网址，软件会读取网页文字，保存到记忆库里。</p>
+              <div class="inline-form">
+                <input id="siteUrl" type="url" placeholder="https://example.com" />
+                <button id="importSite">导入</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-settings" class="tab-panel">
+          <header class="topbar">
+            <div>
+              <h1>设置</h1>
+              <p>选择要搜哪些资料夹，调整结果数量和默认联网搜索网站。</p>
+            </div>
+          </header>
+
+          <div class="settings-layout">
+            <section class="panel">
+              <div class="panel-head">
+                <h2>检索资料夹</h2>
+                <button id="addFolder" class="small-button">添加</button>
+              </div>
+              <div id="folderList" class="folder-list"></div>
+            </section>
+            <section class="panel settings-form">
+              <label>
+                每次最多显示
+                <input id="maxResults" type="number" min="10" max="300" step="10" />
+              </label>
+              <label class="checkline">
+                <input id="includeContent" type="checkbox" />
+                正文检索时读取文本、PDF、Word、Excel 内容
+              </label>
+              <label>
+                默认联网搜索
+                <select id="webEngine">
+                  <option value="bing">Bing</option>
+                  <option value="google">Google</option>
+                  <option value="duckduckgo">DuckDuckGo</option>
+                </select>
+              </label>
+              <button id="saveSettings">保存设置</button>
+            </section>
+          </div>
+
+          <section class="panel data-tools">
+            <div class="panel-head">
+              <h2>软件信息</h2>
+            </div>
+            <div id="appInfoList" class="info-list"></div>
+            <div class="data-tool-grid">
+              <button id="openInstallDir" class="small-button">打开安装位置</button>
+              <button id="openDataDir" class="small-button">打开数据位置</button>
+            </div>
+            <p class="data-tool-note">这里用来确认当前打开的是桌面安装版，数据继续保存在文档里的 DustySearchData。</p>
+          </section>
+
+          <section class="panel data-tools">
+            <div class="panel-head">
+              <h2>数据备份和导出</h2>
+            </div>
+            <div class="data-tool-grid">
+              <button id="createBackup" class="small-button">一键备份</button>
+              <button id="restoreBackup" class="small-button danger-button">恢复备份</button>
+              <button id="exportMemoryJson" class="small-button">导出 JSON</button>
+              <button id="exportMemoryCsv" class="small-button">导出 CSV</button>
+            </div>
+            <p class="data-tool-note">恢复会先自动备份当前数据，再覆盖为你选择的备份。</p>
+          </section>
+
+          <section class="panel data-tools">
+            <div class="panel-head">
+              <h2 id="failureTitle">读取失败列表</h2>
+              <button id="clearFailures" class="small-button">清空</button>
+            </div>
+            <div id="failureList" class="failure-list empty">暂时没有读取失败记录。</div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>

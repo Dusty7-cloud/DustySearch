@@ -1,0 +1,39 @@
+{
+  "name": "dusty-search",
+  "version": "1.0.0",
+  "description": "A local desktop search and memory app.",
+  "main": "src/main.js",
+  "author": "Dusty7",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable",
+    "build:installer": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "mammoth": "^1.12.0",
+    "pdf-parse": "^2.4.5",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.dusty7.search",
+    "productName": "DustySearch",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    }
+  }
+}
