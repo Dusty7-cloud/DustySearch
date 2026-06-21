@@ -16,7 +16,7 @@ It helps you:
 User data is stored outside the app folder:
 
 ```text
-C:\Users\Dusty7\Documents\DustySearchData
+%USERPROFILE%\Documents\DustySearchData
 ```
 
 This keeps personal data separate from app updates.
@@ -37,7 +37,7 @@ npm start
 The self-check writes a report to:
 
 ```text
-C:\Users\Dusty7\Documents\DustySearchData\self-check-result.json
+%USERPROFILE%\Documents\DustySearchData\self-check-result.json
 ```
 
 ## Install Locally
@@ -49,7 +49,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-DustySearch.ps1
 The local installed app is copied to:
 
 ```text
-C:\Users\Dusty7\AppData\Local\DustySearchApp
+%LOCALAPPDATA%\DustySearchApp
 ```
 
 The script also creates a desktop shortcut named `DustySearch`.
