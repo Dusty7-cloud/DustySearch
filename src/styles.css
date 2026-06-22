@@ -587,6 +587,178 @@ mark {
   padding-bottom: 18px;
 }
 
+.data-health {
+  display: grid;
+  gap: 16px;
+  padding: 16px 18px 0;
+}
+
+.health-hero {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid #d8e4de;
+  border-radius: 8px;
+  background: #eef6f2;
+}
+
+.health-hero.warning {
+  border-color: #edd3a9;
+  background: #fff7ea;
+}
+
+.health-hero.danger {
+  border-color: #efc3c3;
+  background: #fff1f1;
+}
+
+.health-score {
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--accent);
+  font-size: 28px;
+  font-weight: 900;
+}
+
+.health-hero.warning .health-score {
+  color: #a26316;
+}
+
+.health-hero.danger .health-score {
+  color: #9f2f2f;
+}
+
+.health-hero p,
+.health-section p {
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.health-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.health-stat {
+  display: grid;
+  gap: 5px;
+  min-height: 94px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f7f4;
+}
+
+.health-stat span,
+.health-stat small,
+.health-tip span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.health-stat strong {
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+.health-section {
+  display: grid;
+  gap: 10px;
+}
+
+.health-path-list,
+.health-tip-list {
+  display: grid;
+  gap: 8px;
+}
+
+.health-path {
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.health-path span {
+  border-radius: 999px;
+  background: #e6efeb;
+  color: var(--accent);
+  padding: 3px 7px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.health-path.is-missing span {
+  background: #f7e7e7;
+  color: #9f2f2f;
+}
+
+.health-path strong {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.health-tip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.health-tip h3 {
+  margin-top: 2px;
+}
+
+.health-tip p {
+  margin-top: 5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.health-tip.good {
+  border-color: #d8e4de;
+  background: #f6fbf8;
+}
+
+.health-tip.warning {
+  border-color: #edd3a9;
+  background: #fffaf0;
+}
+
+.health-tip.danger {
+  border-color: #efc3c3;
+  background: #fff5f5;
+}
+
+.health-empty {
+  display: grid;
+  place-items: center;
+  min-height: 90px;
+  color: var(--muted);
+  text-align: center;
+}
+
 .data-tool-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -804,6 +976,15 @@ mark {
   }
 
   .data-tool-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .health-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .health-tip,
+  .health-hero {
     grid-template-columns: 1fr;
   }
 }
