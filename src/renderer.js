@@ -1,4 +1,4 @@
-const state = {
+﻿const state = {
   appInfo: {},
   settings: {},
   history: [],
@@ -13,7 +13,9 @@ const state = {
   activeSearchId: 0,
   progressTimer: null,
   progressValue: 0,
-  renderedResults: new Map()
+  renderedResults: new Map(),
+  currentResults: [],
+  resultFilter: { bucket: '', sort: 'score-desc' }
 };
 
 const MODE_LABELS = {
@@ -482,18 +484,107 @@ function setActiveMode(mode) {
   $('#resultsTitle').textContent = `${MODE_LABELS[mode] || '匹配'}结果`;
 }
 
-function renderResults(payload, mode = state.activeMode) {
-  const local = payload.local || [];
-  const memory = payload.memory || [];
-  const web = payload.web || [];
-  const all = [
-    ...web.map((item) => ({ ...item, bucket: '网页摘要' })),
-    ...memory.map((item) => ({ ...item, bucket: '记忆库' })),
-    ...local.map((item) => ({ ...item, bucket: mode === 'content' ? '正文结果' : '本地文件' }))
+function buildResultItems(payload, mode = state.activeMode) {
+  return [
+    ...(payload.web || []).map((item) => ({ ...item, bucket: '网页摘要' })),
+    ...(payload.memory || []).map((item) => ({ ...item, bucket: '记忆库' })),
+    ...(payload.local || []).map((item) => ({ ...item, bucket: mode === 'content' ? '正文结果' : '本地文件' }))
   ];
+}
 
-  $('#resultCount').textContent = `${all.length} 条`;
+function getResultTime(item) {
+  return new Date(item.updatedAt || item.createdAt || 0).getTime() || 0;
+}
+
+function getResultScore(item) {
+  const score = Number(item.score || 0);
+  if (score > 0) return score;
+  if (item.type === 'web-fallback') return 0;
+  return 1;
+}
+
+function getResultScorePercent(item) {
+  const scores = state.currentResults.map(getResultScore);
+  const maxScore = Math.max(1, ...scores);
+  return Math.max(8, Math.min(100, Math.round((getResultScore(item) / maxScore) * 100)));
+}
+
+function getResultScoreLabel(percent, item) {
+  if (item.type === 'web-fallback') return '可跳转';
+  if (percent >= 72) return '高匹配';
+  if (percent >= 38) return '中匹配';
+  return '低匹配';
+}
+
+function getVisibleResults() {
+  const bucket = state.resultFilter.bucket;
+  const sort = state.resultFilter.sort || 'score-desc';
+  const items = state.currentResults.filter((item) => !bucket || item.bucket === bucket);
+
+  return items.sort((a, b) => {
+    if (sort === 'time-desc') return getResultTime(b) - getResultTime(a);
+    if (sort === 'title-asc') return String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN');
+    return getResultScore(b) - getResultScore(a);
+  });
+}
+
+function renderResultTools(visibleResults) {
+  const tools = $('#resultTools');
+  const bucketFilter = $('#resultBucketFilter');
+  const sortFilter = $('#resultSortFilter');
+  const insights = $('#resultInsights');
+  if (!tools || !bucketFilter || !sortFilter || !insights) return;
+
+  const hasResults = state.currentResults.length > 0;
+  tools.hidden = !hasResults;
+  insights.hidden = !hasResults;
+  if (!hasResults) return;
+
+  const counts = {};
+  for (const item of state.currentResults) {
+    counts[item.bucket] = (counts[item.bucket] || 0) + 1;
+  }
+  const buckets = Object.keys(counts);
+  const wantedBucket = buckets.includes(state.resultFilter.bucket) ? state.resultFilter.bucket : '';
+  state.resultFilter.bucket = wantedBucket;
+  bucketFilter.innerHTML = `<option value="">全部来源（${state.currentResults.length}）</option>` + buckets.map((bucket) => (
+    `<option value="${escapeAttr(bucket)}">${escapeHtml(bucket)}（${counts[bucket]}）</option>`
+  )).join('');
+  bucketFilter.value = wantedBucket;
+  sortFilter.value = state.resultFilter.sort || 'score-desc';
+
+  const best = state.currentResults
+    .slice()
+    .sort((a, b) => getResultScore(b) - getResultScore(a))[0];
+  const sourceText = buckets.map((bucket) => `${bucket} ${counts[bucket]}`).join(' · ');
+  insights.innerHTML = `
+    <div class="result-insight">
+      <span>当前显示</span>
+      <strong>${visibleResults.length}/${state.currentResults.length}</strong>
+      <small>${escapeHtml(sourceText)}</small>
+    </div>
+    <div class="result-insight">
+      <span>最佳线索</span>
+      <strong>${escapeHtml(best?.bucket || '无')}</strong>
+      <small>${escapeHtml(best?.title || '还没有结果')}</small>
+    </div>
+    <div class="result-insight">
+      <span>排序方式</span>
+      <strong>${sortFilter.options[sortFilter.selectedIndex]?.textContent || '匹配优先'}</strong>
+      <small>可以按来源和时间重新整理</small>
+    </div>
+  `;
+}
+
+function renderCurrentResults(mode = state.activeMode) {
   const list = $('#resultsList');
+  const all = state.currentResults;
+  const visibleResults = getVisibleResults();
+  $('#resultCount').textContent = visibleResults.length === all.length
+    ? `${all.length} 条`
+    : `${visibleResults.length}/${all.length} 条`;
+  renderResultTools(visibleResults);
+
   if (!all.length) {
     list.className = 'list empty';
     list.innerHTML = `
@@ -509,22 +600,38 @@ function renderResults(payload, mode = state.activeMode) {
     return;
   }
 
+  if (!visibleResults.length) {
+    list.className = 'list empty';
+    list.innerHTML = '<div><p>当前筛选下没有结果。</p><button class="small-button empty-action" data-action="clear-result-filter">清空结果筛选</button></div>';
+    return;
+  }
+
   list.className = 'list';
   state.renderedResults = new Map();
-  list.innerHTML = all.map((item) => {
-    const resultId = item.id || `${item.type}-${state.renderedResults.size}`;
+  list.innerHTML = visibleResults.map((item, index) => {
+    const resultId = item.id || `${item.type}-${index}`;
     state.renderedResults.set(resultId, item);
     const isFile = item.type === 'file';
     const source = isFile ? item.path : item.source;
     const meta = isFile
       ? `${formatSize(item.size)} · ${formatDate(item.updatedAt)}`
-      : `${item.bucket} · ${formatDate(item.createdAt)}`;
+      : `${item.bucket} · ${formatDate(item.updatedAt || item.createdAt)}`;
     const reason = getMatchReason(item, mode);
+    const percent = getResultScorePercent(item);
+    const scoreClass = percent >= 72 ? 'strong' : percent >= 38 ? 'medium' : 'low';
 
     return `
       <article class="result-card ${item.type === 'web-fallback' ? 'result-card-muted' : ''}">
-        <div class="result-type">${item.bucket}</div>
-        <h3>${highlight(item.title)}</h3>
+        <div class="result-card-head">
+          <div>
+            <div class="result-type">${item.bucket}</div>
+            <h3>${highlight(item.title)}</h3>
+          </div>
+          <div class="result-score ${scoreClass}">
+            <strong>${percent}</strong>
+            <span>${getResultScoreLabel(percent, item)}</span>
+          </div>
+        </div>
         <div class="match-reason">${escapeHtml(reason)}</div>
         <p>${highlight(item.detail || item.content?.slice(0, 260) || source)}</p>
         <div class="result-meta">${escapeHtml(source)}<br>${meta}</div>
@@ -545,6 +652,12 @@ function renderResults(payload, mode = state.activeMode) {
       </article>
     `;
   }).join('');
+}
+
+function renderResults(payload, mode = state.activeMode) {
+  state.currentResults = buildResultItems(payload, mode);
+  state.resultFilter = { bucket: '', sort: 'score-desc' };
+  renderCurrentResults(mode);
 }
 
 async function refreshState() {
@@ -651,6 +764,10 @@ document.addEventListener('click', async (event) => {
     if (action === 'clear-memory-filter') {
       state.memoryFilter = { category: '', tag: '', text: '', type: '', sort: 'updated-desc', selectedId: '' };
       renderMemory();
+    }
+    if (action === 'clear-result-filter') {
+      state.resultFilter = { bucket: '', sort: 'score-desc' };
+      renderCurrentResults();
     }
     if (action === 'add-folder') $('#addFolder')?.click();
     return;
@@ -774,6 +891,14 @@ $('#memorySortFilter')?.addEventListener('change', (event) => {
   state.memoryFilter.sort = event.target.value;
   state.memoryFilter.selectedId = '';
   renderMemory();
+});
+$('#resultBucketFilter')?.addEventListener('change', (event) => {
+  state.resultFilter.bucket = event.target.value;
+  renderCurrentResults();
+});
+$('#resultSortFilter')?.addEventListener('change', (event) => {
+  state.resultFilter.sort = event.target.value;
+  renderCurrentResults();
 });
 
 $('#searchAllButton').addEventListener('click', () => runSearch('all'));
@@ -916,3 +1041,4 @@ $('#openInstallDir')?.addEventListener('click', async () => {
 
 setActiveMode('all');
 refreshState();
+
