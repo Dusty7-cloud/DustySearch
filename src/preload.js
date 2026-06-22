@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('dustySearch', {
   pickImportFiles: () => ipcRenderer.invoke('file:pickImport'),
   importSite: (url) => ipcRenderer.invoke('site:import', url),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
+  completeOnboarding: () => ipcRenderer.invoke('onboarding:complete'),
+  resetOnboarding: () => ipcRenderer.invoke('onboarding:reset'),
   deleteMemory: (id) => ipcRenderer.invoke('memory:delete', id),
   updateMemoryMeta: (payload) => ipcRenderer.invoke('memory:updateMeta', payload),
   saveResultToMemory: (result) => ipcRenderer.invoke('memory:saveResult', result),

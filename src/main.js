@@ -47,7 +47,9 @@ function defaultDb() {
       searchFolders: [app.getPath('desktop'), app.getPath('documents'), app.getPath('downloads')],
       maxResults: 80,
       includeContent: true,
-      webEngine: 'bing'
+      webEngine: 'bing',
+      onboardingCompleted: false,
+      onboardingCompletedAt: ''
     },
     history: [],
     memory: []
@@ -753,6 +755,21 @@ function getMemorySummary(memory) {
   };
 }
 
+function getOnboardingState(db, localIndex = readLocalIndex()) {
+  const completed = Boolean(db.settings?.onboardingCompleted || db.settings?.onboardingCompletedAt);
+  const hasActivity = Boolean(
+    (db.history || []).length
+    || (db.memory || []).length
+    || (localIndex && localIndex.itemCount > 0)
+  );
+  return {
+    completed,
+    completedAt: db.settings?.onboardingCompletedAt || '',
+    shouldShow: !completed && !hasActivity,
+    hasActivity
+  };
+}
+
 function getDataHealth() {
   const db = readDb();
   const settings = db.settings || {};
@@ -1089,6 +1106,7 @@ async function runSelfCheck() {
   let dataHealthWorks = false;
   let memoryCenterWorks = false;
   let professionalResultsWork = false;
+  let onboardingWorks = false;
   try {
     db.settings.searchFolders = Array.from(new Set([...originalFolders, selfCheckDir]));
     writeDb(db);
@@ -1146,9 +1164,20 @@ async function runSelfCheck() {
     professionalResultsWork = resultBuckets.some((item) => item.bucket === '正文结果' && item.score > 0)
       && resultBuckets.some((item) => item.bucket === '网页摘要')
       && resultBuckets.every((item) => typeof item.title === 'string');
+    const onboardingDb = readDb();
+    const beforeOnboarding = getOnboardingState(onboardingDb);
+    onboardingDb.settings.onboardingCompleted = true;
+    onboardingDb.settings.onboardingCompletedAt = new Date().toISOString();
+    writeDb(onboardingDb);
+    const afterOnboarding = getOnboardingState(readDb());
+    onboardingWorks = typeof beforeOnboarding.shouldShow === 'boolean'
+      && afterOnboarding.completed
+      && Boolean(afterOnboarding.completedAt);
   } finally {
     const restored = readDb();
     restored.settings.searchFolders = originalFolders;
+    restored.settings.onboardingCompleted = db.settings.onboardingCompleted;
+    restored.settings.onboardingCompletedAt = db.settings.onboardingCompletedAt || '';
     restored.history = (restored.history || []).filter((item) => !looksMojibake(item.query));
     restored.memory = (restored.memory || []).filter((item) => item.source !== workbookPath);
     restored.memory = (restored.memory || []).filter((item) => item.source !== 'https://example.com/dustysearch-saved-result-check');
@@ -1176,6 +1205,7 @@ async function runSelfCheck() {
     dataHealthWorks,
     memoryCenterWorks,
     professionalResultsWork,
+    onboardingWorks,
     localIndexWorks: Boolean(localIndex && localIndex.itemCount > 0),
     searchFolders: restoredDb.settings.searchFolders.length,
     appInfoWorks: getAppInfo().name === APP_NAME && fs.existsSync(getAppInfo().appPath),
@@ -1209,6 +1239,7 @@ ipcMain.handle('app:getState', () => {
     dbPath: DB_PATH,
     logPath: LOG_PATH,
     dataHealth: getDataHealth(),
+    onboarding: getOnboardingState(db, localIndex),
     localIndex: localIndex ? {
       builtAt: localIndex.builtAt,
       itemCount: localIndex.itemCount || 0
@@ -1408,10 +1439,28 @@ ipcMain.handle('settings:save', (_event, settings) => {
     searchFolders: Array.isArray(settings.searchFolders) ? settings.searchFolders : db.settings.searchFolders,
     includeContent: Boolean(settings.includeContent),
     webEngine: ['bing', 'google', 'duckduckgo'].includes(settings.webEngine) ? settings.webEngine : 'bing',
-    maxResults: Math.max(10, Math.min(300, Number(settings.maxResults || db.settings.maxResults || 80)))
+    maxResults: Math.max(10, Math.min(300, Number(settings.maxResults || db.settings.maxResults || 80))),
+    onboardingCompleted: Boolean(settings.onboardingCompleted || db.settings.onboardingCompleted),
+    onboardingCompletedAt: settings.onboardingCompletedAt || db.settings.onboardingCompletedAt || ''
   };
   writeDb(db);
   return db.settings;
+});
+
+ipcMain.handle('onboarding:complete', () => {
+  const db = readDb();
+  db.settings.onboardingCompleted = true;
+  db.settings.onboardingCompletedAt = new Date().toISOString();
+  writeDb(db);
+  return getOnboardingState(db);
+});
+
+ipcMain.handle('onboarding:reset', () => {
+  const db = readDb();
+  db.settings.onboardingCompleted = false;
+  db.settings.onboardingCompletedAt = '';
+  writeDb(db);
+  return getOnboardingState(db);
 });
 
 ipcMain.handle('memory:delete', (_event, id) => {
