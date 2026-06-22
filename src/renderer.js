@@ -353,6 +353,9 @@ function renderSettings() {
   $('#maxResults').value = state.settings.maxResults || 80;
   $('#includeContent').checked = Boolean(state.settings.includeContent);
   $('#webEngine').value = state.settings.webEngine || 'bing';
+  $('#saveHistory').checked = state.settings.saveHistory !== false;
+  $('#allowWebSummary').checked = state.settings.allowWebSummary !== false;
+  $('#cacheDocumentText').checked = state.settings.cacheDocumentText !== false;
   renderAppInfo();
   renderFolders();
 }
@@ -938,6 +941,18 @@ $('#clearHistory').addEventListener('click', async () => {
   setStatus('检索历史已清空。');
 });
 
+$('#clearPrivacyHistory')?.addEventListener('click', async () => {
+  state.history = await window.dustySearch.clearHistory();
+  renderHistory();
+  setStatus('检索历史已清空。');
+});
+
+$('#clearPrivacyFailures')?.addEventListener('click', async () => {
+  state.failures = await window.dustySearch.clearFailures();
+  await refreshState();
+  setStatus('读取失败记录已清空。');
+});
+
 $('#clearFailures')?.addEventListener('click', async () => {
   if (state.failures.length && !window.confirm('确定清空读取失败列表吗？')) return;
   state.failures = await window.dustySearch.clearFailures();
@@ -997,6 +1012,9 @@ $('#saveSettings').addEventListener('click', async () => {
   state.settings.maxResults = Number($('#maxResults').value || 80);
   state.settings.includeContent = $('#includeContent').checked;
   state.settings.webEngine = $('#webEngine').value;
+  state.settings.saveHistory = $('#saveHistory').checked;
+  state.settings.allowWebSummary = $('#allowWebSummary').checked;
+  state.settings.cacheDocumentText = $('#cacheDocumentText').checked;
   state.settings = await window.dustySearch.saveSettings(state.settings);
   await refreshState();
   setStatus('设置已保存。');
@@ -1006,6 +1024,20 @@ $('#refreshDataHealth')?.addEventListener('click', async () => {
   setStatus('正在刷新资料体检...');
   await refreshState();
   setStatus('资料体检已刷新。');
+});
+
+$('#clearDocumentCache')?.addEventListener('click', async () => {
+  const ok = window.confirm('确定清理正文缓存吗？下次正文检索会重新读取文件，可能会慢一点。');
+  if (!ok) return;
+  setStatus('正在清理正文缓存...');
+  try {
+    await window.dustySearch.clearDocumentCache();
+    state.localIndex = null;
+    await refreshState();
+    setStatus('正文缓存已清理。');
+  } catch (error) {
+    setStatus(`清理失败：${error.message || error}`);
+  }
 });
 
 $('#finishOnboarding')?.addEventListener('click', async () => {

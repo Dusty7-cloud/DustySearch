@@ -229,6 +229,35 @@
             </div>
           </section>
 
+          <section class="panel data-tools privacy-panel">
+            <div class="panel-head">
+              <div>
+                <h2>隐私和痕迹</h2>
+                <span>控制哪些内容会联网、会保存记录、会留在本机缓存里。</span>
+              </div>
+            </div>
+            <div class="privacy-options">
+              <label class="checkline">
+                <input id="saveHistory" type="checkbox" />
+                保存检索历史
+              </label>
+              <label class="checkline">
+                <input id="allowWebSummary" type="checkbox" />
+                允许“网页摘要”联网读取少量搜索结果
+              </label>
+              <label class="checkline">
+                <input id="cacheDocumentText" type="checkbox" />
+                缓存 PDF、Word、Excel 正文，提升下次检索速度
+              </label>
+            </div>
+            <div class="data-tool-grid privacy-actions">
+              <button id="clearPrivacyHistory" class="small-button">清空检索历史</button>
+              <button id="clearPrivacyFailures" class="small-button">清空读取失败记录</button>
+              <button id="clearDocumentCache" class="small-button danger-button">清理正文缓存</button>
+            </div>
+            <p class="data-tool-note">关闭网页摘要后，浏览器搜索仍可用；关闭正文缓存后，复杂文件每次正文检索会更慢，但本机少留一份正文索引。</p>
+          </section>
+
           <section class="panel data-tools data-health-panel">
             <div class="panel-head">
               <div>

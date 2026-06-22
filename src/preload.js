@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('dustySearch', {
   saveResultToMemory: (result) => ipcRenderer.invoke('memory:saveResult', result),
   clearHistory: () => ipcRenderer.invoke('history:clear'),
   clearFailures: () => ipcRenderer.invoke('failures:clear'),
+  clearDocumentCache: () => ipcRenderer.invoke('privacy:clearDocumentCache'),
   openDataDir: () => ipcRenderer.invoke('data:openDir'),
   openInstallDir: () => ipcRenderer.invoke('app:openInstallDir'),
   createBackup: () => ipcRenderer.invoke('backup:create'),
