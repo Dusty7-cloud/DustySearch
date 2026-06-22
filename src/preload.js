@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('dustySearch', {
   searchContent: (query) => ipcRenderer.invoke('search:content', query),
   searchMemoryOnly: (query) => ipcRenderer.invoke('search:memory', query),
   searchWebResults: (query) => ipcRenderer.invoke('search:webResults', query),
+  cancelSearch: (searchId) => ipcRenderer.invoke('search:cancel', searchId),
   searchWeb: (query) => ipcRenderer.invoke('search:web', query),
   rebuildIndex: () => ipcRenderer.invoke('index:rebuild'),
   openItem: (targetPath) => ipcRenderer.invoke('item:open', targetPath),
