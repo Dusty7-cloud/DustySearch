@@ -6,6 +6,7 @@
   memorySummary: { total: 0, categories: {}, tags: {}, typeCounts: {}, recentCount: 0 },
   localIndex: null,
   dataHealth: null,
+  onboarding: { completed: false, shouldShow: false },
   failures: [],
   memoryFilter: { category: '', tag: '', text: '', type: '', sort: 'updated-desc', selectedId: '' },
   lastQuery: '',
@@ -98,6 +99,26 @@ function focusSearchBox() {
   const input = $('#queryInput');
   input?.focus();
   input?.select();
+}
+
+function showOnboarding() {
+  const overlay = $('#onboardingOverlay');
+  if (overlay) overlay.hidden = false;
+}
+
+function hideOnboarding() {
+  const overlay = $('#onboardingOverlay');
+  if (overlay) overlay.hidden = true;
+}
+
+function isOnboardingOpen() {
+  const overlay = $('#onboardingOverlay');
+  return Boolean(overlay && !overlay.hidden);
+}
+
+async function completeOnboarding() {
+  state.onboarding = await window.dustySearch.completeOnboarding();
+  hideOnboarding();
 }
 
 function escapeHtml(value) {
@@ -669,6 +690,7 @@ async function refreshState() {
   state.memorySummary = fresh.memorySummary || { total: 0, categories: {}, tags: {}, typeCounts: {}, recentCount: 0 };
   state.localIndex = fresh.localIndex || null;
   state.dataHealth = fresh.dataHealth || null;
+  state.onboarding = fresh.onboarding || { completed: false, shouldShow: false };
   state.failures = fresh.failures || [];
   $('#dataPath').textContent = fresh.dataDir;
   renderHistory();
@@ -677,6 +699,7 @@ async function refreshState() {
   renderIndexStatus();
   renderDataHealth();
   renderFailures();
+  if (state.onboarding.shouldShow) showOnboarding();
 }
 
 async function runSearch(mode) {
@@ -770,6 +793,9 @@ document.addEventListener('click', async (event) => {
       renderCurrentResults();
     }
     if (action === 'add-folder') $('#addFolder')?.click();
+    if (isOnboardingOpen()) {
+      hideOnboarding();
+    }
     return;
   }
 
@@ -980,6 +1006,22 @@ $('#refreshDataHealth')?.addEventListener('click', async () => {
   setStatus('正在刷新资料体检...');
   await refreshState();
   setStatus('资料体检已刷新。');
+});
+
+$('#finishOnboarding')?.addEventListener('click', async () => {
+  await completeOnboarding();
+  setStatus('上手引导已完成。');
+});
+
+$('#startFromOnboarding')?.addEventListener('click', async () => {
+  focusSearchBox();
+  await completeOnboarding();
+  setStatus('输入关键词后，选择一个检索按钮。');
+});
+
+$('#showOnboarding')?.addEventListener('click', () => {
+  showOnboarding();
+  setStatus('已打开上手引导。');
 });
 
 $$('#openDataDir').forEach((button) => button.addEventListener('click', () => window.dustySearch.openDataDir()));
