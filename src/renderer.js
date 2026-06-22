@@ -5,6 +5,7 @@ const state = {
   memory: [],
   memorySummary: { total: 0, categories: {}, tags: {} },
   localIndex: null,
+  dataHealth: null,
   failures: [],
   memoryFilter: { category: '', tag: '' },
   lastQuery: '',
@@ -257,6 +258,89 @@ function renderIndexStatus() {
   node.textContent = `当前索引：${state.localIndex.itemCount} 个文件 · ${formatDate(state.localIndex.builtAt)}`;
 }
 
+function healthLevelLabel(level) {
+  if (level === 'danger') return '需处理';
+  if (level === 'warning') return '建议优化';
+  if (level === 'good') return '正常';
+  return '提示';
+}
+
+function topExtensions(extensionCounts = {}) {
+  return Object.entries(extensionCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([ext, count]) => `${ext || '无后缀'} ${count}`)
+    .join(' · ') || '暂无索引';
+}
+
+function renderDataHealth() {
+  const root = $('#dataHealth');
+  if (!root) return;
+  const health = state.dataHealth;
+  if (!health) {
+    root.innerHTML = '<div class="health-empty">还没有体检报告，点“刷新体检”看一下。</div>';
+    return;
+  }
+
+  const stats = [
+    ['健康分', `${health.score || 0}`, health.statusText || '未知'],
+    ['资料夹', `${health.folders?.existing || 0}/${health.folders?.total || 0}`, health.folders?.missing ? `${health.folders.missing} 个失效` : '都能访问'],
+    ['本地索引', health.localIndex ? `${health.localIndex.itemCount || 0}` : '0', health.localIndex ? formatDate(health.localIndex.builtAt) : '还没建立'],
+    ['记忆库', `${health.memory?.total || 0}`, `${health.memory?.categoryCount || 0} 类 · ${health.memory?.tagCount || 0} 个标签`],
+    ['读取失败', `${health.failures?.total || 0}`, health.failures?.total ? '建议看看失败列表' : '暂无失败'],
+    ['备份', `${health.backups?.total || 0}`, health.backups?.latest ? formatDate(health.backups.latest.createdAt) : '还没备份']
+  ];
+
+  const folderList = (health.folders?.items || []).slice(0, 6).map((item) => `
+    <div class="health-path ${item.exists ? '' : 'is-missing'}">
+      <span>${item.exists ? '可用' : '失效'}</span>
+      <strong title="${escapeAttr(item.path)}">${escapeHtml(item.path)}</strong>
+    </div>
+  `).join('');
+
+  const recommendations = (health.recommendations || []).map((item) => `
+    <article class="health-tip ${escapeAttr(item.level || 'info')}">
+      <div>
+        <span>${healthLevelLabel(item.level)}</span>
+        <h3>${escapeHtml(item.title)}</h3>
+        <p>${escapeHtml(item.detail)}</p>
+      </div>
+      ${item.action ? `<button class="small-button health-action" data-action="${escapeAttr(item.action)}">${escapeHtml(item.actionLabel || '处理')}</button>` : ''}
+    </article>
+  `).join('');
+
+  root.innerHTML = `
+    <div class="health-hero ${escapeAttr(health.status || 'info')}">
+      <div class="health-score">${health.score || 0}</div>
+      <div>
+        <h3>${escapeHtml(health.statusText || '体检完成')}</h3>
+        <p>上次体检：${formatDate(health.checkedAt)}。${escapeHtml(health.readableTypes?.note || '')}</p>
+      </div>
+    </div>
+    <div class="health-stat-grid">
+      ${stats.map(([label, value, hint]) => `
+        <div class="health-stat">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value)}</strong>
+          <small>${escapeHtml(hint)}</small>
+        </div>
+      `).join('')}
+    </div>
+    <div class="health-section">
+      <h3>资料夹状态</h3>
+      <div class="health-path-list">${folderList || '<div class="health-empty">还没有资料夹。</div>'}</div>
+    </div>
+    <div class="health-section">
+      <h3>索引类型概览</h3>
+      <p>${escapeHtml(topExtensions(health.localIndex?.extensionCounts))}</p>
+    </div>
+    <div class="health-section">
+      <h3>建议</h3>
+      <div class="health-tip-list">${recommendations}</div>
+    </div>
+  `;
+}
+
 function renderFailures() {
   const list = $('#failureList');
   if (!list) return;
@@ -367,12 +451,14 @@ async function refreshState() {
   state.memory = fresh.memory || [];
   state.memorySummary = fresh.memorySummary || { total: 0, categories: {}, tags: {} };
   state.localIndex = fresh.localIndex || null;
+  state.dataHealth = fresh.dataHealth || null;
   state.failures = fresh.failures || [];
   $('#dataPath').textContent = fresh.dataDir;
   renderHistory();
   renderMemory();
   renderSettings();
   renderIndexStatus();
+  renderDataHealth();
   renderFailures();
 }
 
@@ -455,6 +541,9 @@ document.addEventListener('click', async (event) => {
     }
     if (action === 'go-settings') switchTab('settings');
     if (action === 'go-import') switchTab('import');
+    if (action === 'rebuild-index') $('#rebuildIndex')?.click();
+    if (action === 'create-backup') $('#createBackup')?.click();
+    if (action === 'clear-failures') $('#clearFailures')?.click();
     if (action === 'clear-memory-filter') {
       state.memoryFilter = { category: '', tag: '' };
       $('#memoryCategoryFilter').value = '';
@@ -576,7 +665,7 @@ $('#clearHistory').addEventListener('click', async () => {
 $('#clearFailures')?.addEventListener('click', async () => {
   if (state.failures.length && !window.confirm('确定清空读取失败列表吗？')) return;
   state.failures = await window.dustySearch.clearFailures();
-  renderFailures();
+  await refreshState();
   setStatus('读取失败列表已清空。');
 });
 
@@ -587,6 +676,7 @@ $('#rebuildIndex').addEventListener('click', async () => {
     const result = await window.dustySearch.rebuildIndex();
     state.localIndex = result;
     renderIndexStatus();
+    await refreshState();
     setStatus(`本地索引已刷新：${result.itemCount} 个文件。`);
   } catch (error) {
     setStatus(`刷新索引失败：${error.message || error}`);
@@ -632,8 +722,14 @@ $('#saveSettings').addEventListener('click', async () => {
   state.settings.includeContent = $('#includeContent').checked;
   state.settings.webEngine = $('#webEngine').value;
   state.settings = await window.dustySearch.saveSettings(state.settings);
-  renderSettings();
+  await refreshState();
   setStatus('设置已保存。');
+});
+
+$('#refreshDataHealth')?.addEventListener('click', async () => {
+  setStatus('正在刷新资料体检...');
+  await refreshState();
+  setStatus('资料体检已刷新。');
 });
 
 $('#openDataDir').addEventListener('click', () => window.dustySearch.openDataDir());
@@ -642,6 +738,7 @@ $('#createBackup')?.addEventListener('click', async () => {
   setStatus('正在创建备份...');
   try {
     const result = await window.dustySearch.createBackup();
+    await refreshState();
     setStatus(`备份完成：${result.backupPath}`);
   } catch (error) {
     setStatus(`备份失败：${error.message || error}`);
