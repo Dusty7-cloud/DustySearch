@@ -797,6 +797,37 @@ async function importFile(filePath) {
   return item;
 }
 
+async function saveResultToMemory(result) {
+  const source = String(result?.path || result?.source || '').trim();
+  if (!source) throw new Error('没有可收藏的来源。');
+  if (fs.existsSync(source)) {
+    return importFile(source);
+  }
+
+  const db = readDb();
+  const existingIndex = db.memory.findIndex((item) => item.source === source);
+  const title = String(result?.title || source).trim() || source;
+  const content = String(result?.content || result?.detail || source).slice(0, 120000);
+  const item = {
+    ...(existingIndex >= 0 ? db.memory[existingIndex] : {}),
+    id: cryptoId(),
+    type: /^https?:\/\//i.test(source) ? 'website' : 'saved-result',
+    title,
+    source,
+    category: /^https?:\/\//i.test(source) ? '网站' : '收藏',
+    tags: existingIndex >= 0 ? (db.memory[existingIndex].tags || []) : ['收藏'],
+    content,
+    createdAt: existingIndex >= 0 ? db.memory[existingIndex].createdAt : new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  if (existingIndex >= 0) {
+    db.memory.splice(existingIndex, 1);
+  }
+  db.memory.unshift(item);
+  writeDb(db);
+  return item;
+}
+
 app.whenReady().then(() => {
   ensureDataFile();
   if (IS_SELF_CHECK) {
@@ -839,6 +870,7 @@ async function runSelfCheck() {
   let backupWorks = false;
   let csvExportWorks = false;
   let failureListWorks = false;
+  let saveResultWorks = false;
   try {
     db.settings.searchFolders = Array.from(new Set([...originalFolders, selfCheckDir]));
     writeDb(db);
@@ -851,6 +883,12 @@ async function runSelfCheck() {
     const withImport = readDb();
     const imported = withImport.memory.filter((item) => item.source === workbookPath);
     memoryDedupeWorks = imported.length === 1 && withImport.memory.length === beforeMemoryCount + 1;
+    await saveResultToMemory({
+      title: 'DustySearch Saved Result Check',
+      source: 'https://example.com/dustysearch-saved-result-check',
+      content: 'DustySearchSavedResultMarker'
+    });
+    saveResultWorks = readDb().memory.some((item) => item.source === 'https://example.com/dustysearch-saved-result-check');
     const importedItem = imported[0];
     importedItem.category = '自检';
     importedItem.tags = ['测试', '索引'];
@@ -870,6 +908,7 @@ async function runSelfCheck() {
     restored.settings.searchFolders = originalFolders;
     restored.history = (restored.history || []).filter((item) => !looksMojibake(item.query));
     restored.memory = (restored.memory || []).filter((item) => item.source !== workbookPath);
+    restored.memory = (restored.memory || []).filter((item) => item.source !== 'https://example.com/dustysearch-saved-result-check');
     writeDb(restored);
     writeFailures(readFailures().filter((item) => !String(item.path || '').includes('broken-self-check.docx')));
   }
@@ -889,6 +928,7 @@ async function runSelfCheck() {
     backupWorks,
     csvExportWorks,
     failureListWorks,
+    saveResultWorks,
     localIndexWorks: Boolean(localIndex && localIndex.itemCount > 0),
     searchFolders: restoredDb.settings.searchFolders.length,
     appInfoWorks: getAppInfo().name === APP_NAME && fs.existsSync(getAppInfo().appPath),
@@ -1092,6 +1132,10 @@ ipcMain.handle('memory:updateMeta', (_event, payload) => {
   item.updatedAt = new Date().toISOString();
   writeDb(db);
   return db.memory;
+});
+
+ipcMain.handle('memory:saveResult', async (_event, result) => {
+  return saveResultToMemory(result);
 });
 
 ipcMain.handle('history:clear', () => {
