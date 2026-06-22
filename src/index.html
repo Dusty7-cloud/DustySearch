@@ -219,6 +219,16 @@
             </section>
           </div>
 
+          <section class="panel data-tools">
+            <div class="panel-head">
+              <div>
+                <h2>上手引导</h2>
+                <span>需要重新看一遍软件怎么用时，可以从这里打开。</span>
+              </div>
+              <button id="showOnboarding" class="small-button">重新打开引导</button>
+            </div>
+          </section>
+
           <section class="panel data-tools data-health-panel">
             <div class="panel-head">
               <div>
@@ -266,6 +276,34 @@
           </section>
         </section>
       </main>
+    </div>
+
+    <div id="onboardingOverlay" class="onboarding-overlay" hidden>
+      <section class="onboarding-panel">
+        <div class="onboarding-head">
+          <span>DustySearch</span>
+          <h2>先把资料入口搭好</h2>
+          <p>按这几步走，软件就能开始帮你找本地文件、正文、网页摘要和记忆库内容。</p>
+        </div>
+        <div class="onboarding-steps">
+          <button class="onboarding-step" data-action="go-settings">
+            <strong>1. 检查资料夹</strong>
+            <span>确认桌面、文档、下载等位置都在检索范围里。</span>
+          </button>
+          <button class="onboarding-step" data-action="rebuild-index">
+            <strong>2. 刷新本地索引</strong>
+            <span>先整理文件目录，后面搜索会更快。</span>
+          </button>
+          <button class="onboarding-step" data-action="go-import">
+            <strong>3. 导入重要资料</strong>
+            <span>常用文件和网站放进记忆库，之后能单独检索。</span>
+          </button>
+        </div>
+        <div class="onboarding-actions">
+          <button id="startFromOnboarding">开始搜索</button>
+          <button id="finishOnboarding" class="small-button">我知道了</button>
+        </div>
+      </section>
     </div>
 
     <script src="./renderer.js"></script>
