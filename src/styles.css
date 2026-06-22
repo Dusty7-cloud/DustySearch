@@ -262,6 +262,41 @@ h3 {
   margin-bottom: 18px;
 }
 
+.quick-start {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 16px 18px;
+  border: 1px solid #d8e4de;
+  border-radius: 8px;
+  background: #eef6f2;
+}
+
+.quick-start h2 {
+  font-size: 16px;
+}
+
+.quick-start p {
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.quick-actions,
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.ghost-action,
+.empty-action {
+  white-space: nowrap;
+}
+
 .tool-row {
   display: flex;
   align-items: center;
@@ -318,6 +353,10 @@ mark {
   min-height: 170px;
   color: var(--muted);
   text-align: center;
+}
+
+.empty p {
+  margin-bottom: 12px;
 }
 
 .result-card {
@@ -621,6 +660,13 @@ mark {
   text-overflow: ellipsis;
 }
 
+.folder-empty {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  color: var(--muted);
+}
+
 .icon-button {
   display: grid;
   place-items: center;
@@ -690,11 +736,22 @@ mark {
 
   .search-box,
   .mode-buttons,
+  .quick-start,
   .memory-tools,
   .content-grid,
   .import-grid,
   .settings-layout {
     grid-template-columns: 1fr;
+  }
+
+  .quick-actions,
+  .empty-actions {
+    justify-content: stretch;
+  }
+
+  .quick-actions button,
+  .empty-actions button {
+    width: 100%;
   }
 
   .data-tool-grid {

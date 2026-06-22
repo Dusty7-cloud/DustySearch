@@ -43,6 +43,13 @@ function switchTab(tab) {
   $$('.tab-panel').forEach((panel) => panel.classList.toggle('active', panel.id === `tab-${tab}`));
 }
 
+function focusSearchBox() {
+  switchTab('search');
+  const input = $('#queryInput');
+  input?.focus();
+  input?.select();
+}
+
 function escapeHtml(value) {
   return String(value || '')
     .replaceAll('&', '&amp;')
@@ -97,7 +104,9 @@ function renderMemory() {
 
   if (!items.length) {
     list.className = 'memory-list empty';
-    list.textContent = state.memory.length ? '没有符合筛选的记忆库内容。' : '还没有导入内容。';
+    list.innerHTML = state.memory.length
+      ? '<div><p>没有符合筛选的记忆库内容。</p><button class="small-button empty-action" data-action="clear-memory-filter">清空筛选</button></div>'
+      : '<div><p>还没有导入内容。</p><button class="small-button empty-action" data-action="go-import">去导入资料</button></div>';
     return;
   }
 
@@ -153,7 +162,7 @@ function renderFolders() {
   const list = $('#folderList');
   const folders = state.settings.searchFolders || [];
   if (!folders.length) {
-    list.innerHTML = '<div class="folder-empty">还没有选择资料夹。</div>';
+    list.innerHTML = '<div class="folder-empty">还没有选择资料夹。<button class="small-button empty-action" data-action="add-folder">添加资料夹</button></div>';
     return;
   }
 
@@ -252,7 +261,16 @@ function renderResults(payload, mode = state.activeMode) {
   const list = $('#resultsList');
   if (!all.length) {
     list.className = 'list empty';
-    list.textContent = '没有找到匹配结果，可以换个关键词，或者换一个检索按钮。';
+    list.innerHTML = `
+      <div>
+        <p>没有找到匹配结果，可以换个关键词，或者换一个检索按钮。</p>
+        <div class="empty-actions">
+          <button class="small-button empty-action" data-action="focus-search">换个关键词</button>
+          <button class="small-button empty-action" data-action="go-settings">检查资料夹</button>
+          <button class="small-button empty-action" data-action="go-import">导入资料</button>
+        </div>
+      </div>
+    `;
     return;
   }
 
@@ -360,6 +378,24 @@ document.addEventListener('click', async (event) => {
       return;
     }
     runSearch(mode);
+  }
+
+  const action = event.target.closest('[data-action]')?.dataset.action;
+  if (action) {
+    if (action === 'focus-search') {
+      focusSearchBox();
+      setStatus('输入关键词后，选择一个检索按钮。');
+    }
+    if (action === 'go-settings') switchTab('settings');
+    if (action === 'go-import') switchTab('import');
+    if (action === 'clear-memory-filter') {
+      state.memoryFilter = { category: '', tag: '' };
+      $('#memoryCategoryFilter').value = '';
+      $('#memoryTagFilter').value = '';
+      renderMemory();
+    }
+    if (action === 'add-folder') $('#addFolder')?.click();
+    return;
   }
 
   const historyItem = event.target.closest('.history-item');
