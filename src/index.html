@@ -90,6 +90,17 @@
                 <h2 id="resultsTitle">匹配结果</h2>
                 <span id="resultCount">0 条</span>
               </div>
+              <div id="resultInsights" class="result-insights" hidden></div>
+              <div id="resultTools" class="result-tools" hidden>
+                <select id="resultBucketFilter">
+                  <option value="">全部来源</option>
+                </select>
+                <select id="resultSortFilter">
+                  <option value="score-desc">匹配优先</option>
+                  <option value="time-desc">最新优先</option>
+                  <option value="title-asc">标题 A-Z</option>
+                </select>
+              </div>
               <div id="resultsList" class="list empty">输入关键词后，选择一个检索按钮。</div>
             </section>
 
