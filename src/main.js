@@ -252,6 +252,32 @@ function createBackup(reason = 'manual') {
   return backupPath;
 }
 
+function listBackups() {
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) return [];
+    return fs.readdirSync(BACKUP_DIR, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => {
+        const backupPath = path.join(BACKUP_DIR, entry.name);
+        let createdAt = fs.statSync(backupPath).mtime.toISOString();
+        try {
+          const infoPath = path.join(backupPath, 'backup-info.json');
+          if (fs.existsSync(infoPath)) {
+            const info = JSON.parse(fs.readFileSync(infoPath, 'utf8'));
+            createdAt = info.createdAt || createdAt;
+          }
+        } catch {
+          // 旧备份缺信息时，用文件夹时间兜底。
+        }
+        return { name: entry.name, path: backupPath, createdAt };
+      })
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  } catch (error) {
+    logLine('backup list failed', error.message || String(error));
+    return [];
+  }
+}
+
 function restoreBackup(backupPath) {
   const memoryPath = path.join(backupPath, 'memory.json');
   if (!fs.existsSync(memoryPath)) {
@@ -719,6 +745,117 @@ function getMemorySummary(memory) {
   };
 }
 
+function getDataHealth() {
+  const db = readDb();
+  const settings = db.settings || {};
+  const folders = Array.from(new Set(settings.searchFolders || [])).filter(Boolean);
+  const folderItems = folders.map((folder) => ({
+    path: folder,
+    exists: fs.existsSync(folder)
+  }));
+  const existingFolders = folderItems.filter((item) => item.exists).map((item) => item.path);
+  const missingFolders = folderItems.filter((item) => !item.exists);
+  const localIndex = readLocalIndex();
+  const failures = readFailures();
+  const backups = listBackups();
+  const memorySummary = getMemorySummary(db.memory);
+  const extensionCounts = {};
+
+  for (const item of localIndex?.items || []) {
+    const ext = item.ext || path.extname(item.path || '').toLowerCase() || '无后缀';
+    extensionCounts[ext] = (extensionCounts[ext] || 0) + 1;
+  }
+
+  const failureReasons = {};
+  for (const failure of failures) {
+    const reason = failure.message || '读取失败';
+    failureReasons[reason] = (failureReasons[reason] || 0) + 1;
+  }
+
+  const recommendations = [];
+  const addRecommendation = (level, title, detail, action = '', actionLabel = '') => {
+    recommendations.push({ level, title, detail, action, actionLabel });
+  };
+
+  if (!folders.length) {
+    addRecommendation('danger', '还没有选择检索资料夹', '本地文件名和正文检索没有地方可搜，先添加一个常用资料夹。', 'add-folder', '添加资料夹');
+  }
+  if (missingFolders.length) {
+    addRecommendation('danger', `${missingFolders.length} 个资料夹找不到了`, '可能是文件夹被移动、改名，或者外接硬盘没插上。', 'go-settings', '检查资料夹');
+  }
+  if (!localIndex) {
+    addRecommendation('warning', '还没有本地索引', '第一次检索会自动建立；也可以现在手动刷新，让后面的搜索更快。', 'rebuild-index', '刷新索引');
+  } else if (!isIndexUsable(localIndex, existingFolders)) {
+    addRecommendation('warning', '本地索引需要更新', '资料夹列表有变化，建议刷新一次索引。', 'rebuild-index', '刷新索引');
+  }
+  if (!settings.includeContent) {
+    addRecommendation('warning', '正文检索已关闭', '文件名还能搜，但 PDF、Word、Excel、文本正文不会参与匹配。', 'go-settings', '打开正文检索');
+  }
+  if (failures.length) {
+    addRecommendation('warning', `${failures.length} 条读取失败`, '通常是加密、损坏、权限不够或格式不标准的文件，可以在下面查看。', 'clear-failures', '清空旧记录');
+  }
+  if (!memorySummary.total) {
+    addRecommendation('info', '记忆库还是空的', '把常用文件、网站或重要结果收藏进来，后面可以单独检索。', 'go-import', '导入资料');
+  }
+  if (!backups.length) {
+    addRecommendation('info', '还没有备份', '做一次备份，后面误删或改乱了可以恢复。', 'create-backup', '一键备份');
+  }
+  if (!recommendations.length) {
+    addRecommendation('good', '状态不错', '资料夹、索引、记忆库和备份都处在可用状态。', '', '');
+  }
+
+  const dangerCount = recommendations.filter((item) => item.level === 'danger').length;
+  const warningCount = recommendations.filter((item) => item.level === 'warning').length;
+  const score = Math.max(45, 100 - dangerCount * 24 - warningCount * 12 - (recommendations.length > 1 ? 4 : 0));
+  const status = dangerCount ? 'danger' : warningCount ? 'warning' : 'good';
+  const statusText = dangerCount ? '需要处理' : warningCount ? '可以优化' : '状态良好';
+
+  return {
+    checkedAt: new Date().toISOString(),
+    score,
+    status,
+    statusText,
+    folders: {
+      total: folders.length,
+      existing: existingFolders.length,
+      missing: missingFolders.length,
+      items: folderItems
+    },
+    localIndex: localIndex ? {
+      builtAt: localIndex.builtAt,
+      itemCount: localIndex.itemCount || 0,
+      roots: localIndex.roots || [],
+      stale: !isIndexUsable(localIndex, existingFolders),
+      extensionCounts
+    } : null,
+    readableTypes: {
+      text: Array.from(TEXT_EXTENSIONS).sort(),
+      documents: Array.from(DOCUMENT_EXTENSIONS).sort(),
+      note: settings.includeContent ? '正文检索已开启' : '正文检索已关闭'
+    },
+    memory: {
+      total: memorySummary.total,
+      categoryCount: Object.keys(memorySummary.categories || {}).length,
+      tagCount: Object.keys(memorySummary.tags || {}).length
+    },
+    failures: {
+      total: failures.length,
+      recent: failures.slice(0, 5),
+      reasons: Object.entries(failureReasons).map(([message, count]) => ({ message, count })).slice(0, 6)
+    },
+    backups: {
+      total: backups.length,
+      latest: backups[0] || null
+    },
+    settings: {
+      includeContent: Boolean(settings.includeContent),
+      maxResults: settings.maxResults || 80,
+      webEngine: settings.webEngine || 'bing'
+    },
+    recommendations
+  };
+}
+
 function getWebUrl(query) {
   const db = readDb();
   const engine = db.settings?.webEngine || 'bing';
@@ -941,6 +1078,7 @@ async function runSelfCheck() {
   let failureListWorks = false;
   let saveResultWorks = false;
   let cancelSearchWorks = false;
+  let dataHealthWorks = false;
   try {
     db.settings.searchFolders = Array.from(new Set([...originalFolders, selfCheckDir]));
     writeDb(db);
@@ -982,6 +1120,10 @@ async function runSelfCheck() {
     } finally {
       clearSearch(cancelCheckId);
     }
+    const dataHealth = getDataHealth();
+    dataHealthWorks = dataHealth.folders.total > 0
+      && dataHealth.readableTypes.documents.includes('.pdf')
+      && Array.isArray(dataHealth.recommendations);
   } finally {
     const restored = readDb();
     restored.settings.searchFolders = originalFolders;
@@ -1009,6 +1151,7 @@ async function runSelfCheck() {
     failureListWorks,
     saveResultWorks,
     cancelSearchWorks,
+    dataHealthWorks,
     localIndexWorks: Boolean(localIndex && localIndex.itemCount > 0),
     searchFolders: restoredDb.settings.searchFolders.length,
     appInfoWorks: getAppInfo().name === APP_NAME && fs.existsSync(getAppInfo().appPath),
@@ -1041,6 +1184,7 @@ ipcMain.handle('app:getState', () => {
     dataDir: DATA_DIR,
     dbPath: DB_PATH,
     logPath: LOG_PATH,
+    dataHealth: getDataHealth(),
     localIndex: localIndex ? {
       builtAt: localIndex.builtAt,
       itemCount: localIndex.itemCount || 0
