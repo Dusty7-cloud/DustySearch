@@ -8,7 +8,10 @@ const state = {
   failures: [],
   memoryFilter: { category: '', tag: '' },
   lastQuery: '',
-  activeMode: 'all'
+  activeMode: 'all',
+  activeSearchId: 0,
+  progressTimer: null,
+  progressValue: 0
 };
 
 const MODE_LABELS = {
@@ -36,6 +39,49 @@ function formatSize(bytes) {
 
 function setStatus(message) {
   $('#statusText').textContent = message;
+}
+
+function setProgress(percent, detail) {
+  const progress = $('#searchProgress');
+  const bar = $('#progressBar');
+  const detailNode = $('#progressDetail');
+  if (!progress || !bar || !detailNode) return;
+  progress.hidden = false;
+  bar.style.width = `${Math.max(5, Math.min(100, percent))}%`;
+  detailNode.textContent = detail;
+}
+
+function startProgress(mode) {
+  stopProgress(false);
+  state.progressValue = 8;
+  $('#progressTitle').textContent = `正在检索：${MODE_LABELS[mode] || '匹配'}`;
+  setProgress(state.progressValue, '正在准备检索...');
+  state.progressTimer = window.setInterval(() => {
+    state.progressValue = Math.min(88, state.progressValue + 7);
+    const detail = state.progressValue < 35
+      ? '正在检查资料夹和索引...'
+      : state.progressValue < 70
+        ? '正在匹配文件、正文和记忆库...'
+        : '正在整理结果...';
+    setProgress(state.progressValue, detail);
+  }, 450);
+}
+
+function stopProgress(showComplete = true) {
+  if (state.progressTimer) {
+    window.clearInterval(state.progressTimer);
+    state.progressTimer = null;
+  }
+  const progress = $('#searchProgress');
+  if (!progress) return;
+  if (showComplete) {
+    setProgress(100, '检索完成。');
+    window.setTimeout(() => {
+      if (!state.progressTimer) progress.hidden = true;
+    }, 700);
+  } else {
+    progress.hidden = true;
+  }
 }
 
 function switchTab(tab) {
@@ -334,6 +380,9 @@ async function runSearch(mode) {
   state.lastQuery = query;
   setActiveMode(mode);
   setStatus(`正在检索：${MODE_LABELS[mode]}...`);
+  const searchId = Date.now();
+  state.activeSearchId = searchId;
+  startProgress(mode);
   setBusy(true);
 
   try {
@@ -344,19 +393,26 @@ async function runSearch(mode) {
     if (mode === 'web') result = await window.dustySearch.searchWebResults(query);
     if (mode === 'all') result = await window.dustySearch.searchAll(query);
 
+    if (state.activeSearchId !== searchId) return;
     renderResults(result, mode);
     await refreshState();
     const count = (result.local || []).length + (result.memory || []).length + (result.web || []).length;
     setStatus(`${MODE_LABELS[mode]}完成：${count} 条。`);
   } catch (error) {
+    if (state.activeSearchId !== searchId) return;
     setStatus(`检索失败：${error.message || error}`);
   } finally {
-    setBusy(false);
+    if (state.activeSearchId === searchId) {
+      stopProgress(true);
+      setBusy(false);
+      state.activeSearchId = 0;
+    }
   }
 }
 
 function setBusy(isBusy) {
   $('#searchAllButton').disabled = isBusy;
+  $('#stopSearch').disabled = !isBusy;
   $$('.mode-button').forEach((button) => {
     button.disabled = isBusy;
   });
@@ -395,6 +451,14 @@ document.addEventListener('click', async (event) => {
       renderMemory();
     }
     if (action === 'add-folder') $('#addFolder')?.click();
+    return;
+  }
+
+  if (event.target.closest('#stopSearch')) {
+    state.activeSearchId = 0;
+    stopProgress(false);
+    setBusy(false);
+    setStatus('已停止本次检索。');
     return;
   }
 
