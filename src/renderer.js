@@ -3,11 +3,11 @@ const state = {
   settings: {},
   history: [],
   memory: [],
-  memorySummary: { total: 0, categories: {}, tags: {} },
+  memorySummary: { total: 0, categories: {}, tags: {}, typeCounts: {}, recentCount: 0 },
   localIndex: null,
   dataHealth: null,
   failures: [],
-  memoryFilter: { category: '', tag: '' },
+  memoryFilter: { category: '', tag: '', text: '', type: '', sort: 'updated-desc', selectedId: '' },
   lastQuery: '',
   activeMode: 'all',
   activeSearchId: 0,
@@ -138,46 +138,146 @@ function renderHistory() {
   `).join('');
 }
 
-function renderMemory() {
-  const list = $('#memoryList');
-  renderMemoryFilters();
-  renderTagCloud();
+function getMemoryType(item) {
+  if (item.type === 'website') return 'website';
+  if (item.type === 'saved-result') return 'saved';
+  return 'file';
+}
+
+function memoryTypeLabel(type) {
+  if (type === 'website') return '网站';
+  if (type === 'saved') return '收藏';
+  return '文件';
+}
+
+function getMemoryPreview(item, length = 180) {
+  return String(item.content || item.source || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, length);
+}
+
+function getFilteredMemory() {
   const category = state.memoryFilter.category;
   const tag = state.memoryFilter.tag;
+  const text = state.memoryFilter.text;
+  const type = state.memoryFilter.type;
+  const sort = state.memoryFilter.sort || 'updated-desc';
   const items = state.memory.filter((item) => {
+    const typeKey = getMemoryType(item);
     const categoryOk = !category || item.category === category;
     const tagOk = !tag || (item.tags || []).some((value) => value.includes(tag));
-    return categoryOk && tagOk;
+    const typeOk = !type || typeKey === type;
+    const haystack = `${item.title || ''} ${item.source || ''} ${(item.tags || []).join(' ')} ${item.content || ''}`.toLowerCase();
+    const textOk = !text || haystack.includes(text.toLowerCase());
+    return categoryOk && tagOk && typeOk && textOk;
   });
+
+  return items.sort((a, b) => {
+    if (sort === 'title-asc') return String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN');
+    if (sort === 'created-desc') return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+    return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0);
+  });
+}
+
+function renderMemoryOverview() {
+  const node = $('#memoryOverview');
+  if (!node) return;
+  const summary = state.memorySummary || {};
+  const typeCounts = summary.typeCounts || {};
+  const cards = [
+    ['总资料', summary.total || 0, '已导入和收藏'],
+    ['文件', typeCounts.file || 0, '本地资料'],
+    ['网站', typeCounts.website || 0, '网页内容'],
+    ['收藏', typeCounts.saved || 0, '主动保存的结果'],
+    ['本周更新', summary.recentCount || 0, '最近整理过']
+  ];
+  node.innerHTML = cards.map(([label, value, hint]) => `
+    <div class="memory-stat">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <small>${escapeHtml(hint)}</small>
+    </div>
+  `).join('');
+}
+
+function renderMemory() {
+  const list = $('#memoryList');
+  const countNode = $('#memoryListCount');
+  renderMemoryFilters();
+  renderTagCloud();
+  renderMemoryOverview();
+  const items = getFilteredMemory();
+  if (countNode) countNode.textContent = `${items.length} 条`;
+  if (items.length && !items.some((item) => item.id === state.memoryFilter.selectedId)) {
+    state.memoryFilter.selectedId = items[0].id;
+  }
 
   if (!items.length) {
     list.className = 'memory-list empty';
     list.innerHTML = state.memory.length
       ? '<div><p>没有符合筛选的记忆库内容。</p><button class="small-button empty-action" data-action="clear-memory-filter">清空筛选</button></div>'
       : '<div><p>还没有导入内容。</p><button class="small-button empty-action" data-action="go-import">去导入资料</button></div>';
+    renderMemoryDetail(null);
     return;
   }
 
   list.className = 'memory-list';
   list.innerHTML = items.map((item) => `
-    <article class="memory-item">
+    <article class="memory-item ${state.memoryFilter.selectedId === item.id ? 'active' : ''}" data-memory-id="${escapeAttr(item.id)}">
       <div>
-        <h3>${escapeHtml(item.title)}</h3>
+        <div class="memory-item-head">
+          <h3>${escapeHtml(item.title)}</h3>
+          <span>${memoryTypeLabel(getMemoryType(item))}</span>
+        </div>
         <p>${escapeHtml(item.source)}</p>
         <div class="memory-meta-row">
           <span>${escapeHtml(item.category || '其他')}</span>
           <span>${(item.tags || []).map((tag) => `<b>${escapeHtml(tag)}</b>`).join(' ') || '无标签'}</span>
-          <small>${item.type === 'website' ? '网站' : '文件'} · ${formatDate(item.createdAt)}</small>
+          <small>${formatDate(item.updatedAt || item.createdAt)}</small>
         </div>
-        <div class="memory-edit">
-          <input class="memory-category-input" data-id="${item.id}" value="${escapeAttr(item.category || '其他')}" placeholder="分类" />
-          <input class="memory-tags-input" data-id="${item.id}" value="${escapeAttr((item.tags || []).join(', '))}" placeholder="标签，用逗号隔开" />
-          <button class="small-button save-memory-meta" data-id="${item.id}">保存</button>
-        </div>
+        <p class="memory-preview">${escapeHtml(getMemoryPreview(item, 140) || '暂无正文预览')}</p>
       </div>
-      <button class="small-button delete-memory" data-id="${item.id}">删除</button>
     </article>
   `).join('');
+  renderMemoryDetail(items.find((item) => item.id === state.memoryFilter.selectedId) || items[0]);
+}
+
+function renderMemoryDetail(item) {
+  const detail = $('#memoryDetail');
+  if (!detail) return;
+  if (!item) {
+    detail.className = 'memory-detail empty';
+    detail.textContent = state.memory.length ? '没有符合筛选的资料。' : '选择左边的一条资料查看详情。';
+    return;
+  }
+  detail.className = 'memory-detail';
+  const type = getMemoryType(item);
+  detail.innerHTML = `
+    <div class="memory-detail-top">
+      <span>${memoryTypeLabel(type)}</span>
+      <h3>${escapeHtml(item.title)}</h3>
+      <p title="${escapeAttr(item.source)}">${escapeHtml(item.source)}</p>
+    </div>
+    <div class="memory-detail-actions">
+      <button class="small-button open-source" data-source="${escapeAttr(item.source)}">打开来源</button>
+      <button class="small-button copy-source" data-source="${escapeAttr(item.source)}">复制来源</button>
+      <button class="small-button delete-memory danger-button" data-id="${escapeAttr(item.id)}">删除</button>
+    </div>
+    <div class="memory-edit memory-detail-edit">
+      <input class="memory-category-input" data-id="${item.id}" value="${escapeAttr(item.category || '其他')}" placeholder="分类" />
+      <input class="memory-tags-input" data-id="${item.id}" value="${escapeAttr((item.tags || []).join(', '))}" placeholder="标签，用逗号隔开" />
+      <button class="small-button save-memory-meta" data-id="${item.id}">保存</button>
+    </div>
+    <div class="memory-detail-meta">
+      <div><span>加入</span><strong>${formatDate(item.createdAt)}</strong></div>
+      <div><span>更新</span><strong>${formatDate(item.updatedAt || item.createdAt)}</strong></div>
+      <div><span>分类</span><strong>${escapeHtml(item.category || '其他')}</strong></div>
+    </div>
+    <div class="memory-detail-content">
+      ${escapeHtml(getMemoryPreview(item, 1200) || '暂无可预览正文。')}
+    </div>
+  `;
 }
 
 function renderTagCloud() {
@@ -204,6 +304,10 @@ function renderMemoryFilters() {
     return `<option value="${escapeAttr(category)}">${escapeHtml(category)}（${count}）</option>`;
   }).join('');
   select.value = categories.includes(wanted) ? wanted : '';
+  $('#memorySearchInput').value = state.memoryFilter.text || '';
+  $('#memoryTypeFilter').value = state.memoryFilter.type || '';
+  $('#memorySortFilter').value = state.memoryFilter.sort || 'updated-desc';
+  $('#memoryTagFilter').value = state.memoryFilter.tag || '';
 }
 
 function renderFolders() {
@@ -449,7 +553,7 @@ async function refreshState() {
   state.settings = fresh.settings || {};
   state.history = fresh.history || [];
   state.memory = fresh.memory || [];
-  state.memorySummary = fresh.memorySummary || { total: 0, categories: {}, tags: {} };
+  state.memorySummary = fresh.memorySummary || { total: 0, categories: {}, tags: {}, typeCounts: {}, recentCount: 0 };
   state.localIndex = fresh.localIndex || null;
   state.dataHealth = fresh.dataHealth || null;
   state.failures = fresh.failures || [];
@@ -545,9 +649,7 @@ document.addEventListener('click', async (event) => {
     if (action === 'create-backup') $('#createBackup')?.click();
     if (action === 'clear-failures') $('#clearFailures')?.click();
     if (action === 'clear-memory-filter') {
-      state.memoryFilter = { category: '', tag: '' };
-      $('#memoryCategoryFilter').value = '';
-      $('#memoryTagFilter').value = '';
+      state.memoryFilter = { category: '', tag: '', text: '', type: '', sort: 'updated-desc', selectedId: '' };
       renderMemory();
     }
     if (action === 'add-folder') $('#addFolder')?.click();
@@ -568,6 +670,12 @@ document.addEventListener('click', async (event) => {
   if (historyItem) {
     $('#queryInput').value = historyItem.dataset.query;
     runSearch(state.activeMode || 'all');
+  }
+
+  const memoryItem = event.target.closest('.memory-item[data-memory-id]');
+  if (memoryItem) {
+    state.memoryFilter.selectedId = memoryItem.dataset.memoryId;
+    renderMemory();
   }
 
   const openFile = event.target.closest('.open-file');
@@ -644,10 +752,27 @@ document.addEventListener('click', async (event) => {
 
 $('#memoryCategoryFilter')?.addEventListener('change', (event) => {
   state.memoryFilter.category = event.target.value;
+  state.memoryFilter.selectedId = '';
   renderMemory();
 });
 $('#memoryTagFilter')?.addEventListener('input', (event) => {
   state.memoryFilter.tag = event.target.value.trim();
+  state.memoryFilter.selectedId = '';
+  renderMemory();
+});
+$('#memorySearchInput')?.addEventListener('input', (event) => {
+  state.memoryFilter.text = event.target.value.trim();
+  state.memoryFilter.selectedId = '';
+  renderMemory();
+});
+$('#memoryTypeFilter')?.addEventListener('change', (event) => {
+  state.memoryFilter.type = event.target.value;
+  state.memoryFilter.selectedId = '';
+  renderMemory();
+});
+$('#memorySortFilter')?.addEventListener('change', (event) => {
+  state.memoryFilter.sort = event.target.value;
+  state.memoryFilter.selectedId = '';
   renderMemory();
 });
 
@@ -732,7 +857,7 @@ $('#refreshDataHealth')?.addEventListener('click', async () => {
   setStatus('资料体检已刷新。');
 });
 
-$('#openDataDir').addEventListener('click', () => window.dustySearch.openDataDir());
+$$('#openDataDir').forEach((button) => button.addEventListener('click', () => window.dustySearch.openDataDir()));
 
 $('#createBackup')?.addEventListener('click', async () => {
   setStatus('正在创建备份...');

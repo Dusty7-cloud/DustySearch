@@ -106,18 +106,45 @@
         <section id="tab-memory" class="tab-panel">
           <header class="topbar">
             <div>
-              <h1>记忆库</h1>
-              <p>导入过的文件和网站内容会存在这里，之后可以单独检索。</p>
+              <h1>记忆库资料中心</h1>
+              <p>导入、收藏过的文件和网站会存在这里，可以筛选、整理、预览和单独检索。</p>
             </div>
           </header>
+          <div id="memoryOverview" class="memory-overview"></div>
           <div class="memory-tools">
+            <input id="memorySearchInput" type="search" placeholder="在记忆库里筛选标题、来源、正文" />
             <select id="memoryCategoryFilter">
               <option value="">全部分类</option>
+            </select>
+            <select id="memoryTypeFilter">
+              <option value="">全部类型</option>
+              <option value="file">文件</option>
+              <option value="website">网站</option>
+              <option value="saved">收藏</option>
+            </select>
+            <select id="memorySortFilter">
+              <option value="updated-desc">最近更新</option>
+              <option value="created-desc">最近加入</option>
+              <option value="title-asc">标题 A-Z</option>
             </select>
             <input id="memoryTagFilter" type="search" placeholder="按标签筛选，比如：课程、证件、项目" />
           </div>
           <div id="memoryTagCloud" class="tag-cloud"></div>
-          <div id="memoryList" class="memory-list empty">还没有导入内容。</div>
+          <div class="memory-workspace">
+            <section class="panel memory-list-panel">
+              <div class="panel-head">
+                <h2 id="memoryListTitle">资料列表</h2>
+                <span id="memoryListCount">0 条</span>
+              </div>
+              <div id="memoryList" class="memory-list empty">还没有导入内容。</div>
+            </section>
+            <section class="panel memory-detail-panel">
+              <div class="panel-head">
+                <h2>资料预览</h2>
+              </div>
+              <div id="memoryDetail" class="memory-detail empty">选择左边的一条资料查看详情。</div>
+            </section>
+          </div>
         </section>
 
         <section id="tab-import" class="tab-panel">
