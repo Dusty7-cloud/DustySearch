@@ -49,7 +49,10 @@ function defaultDb() {
       includeContent: true,
       webEngine: 'bing',
       onboardingCompleted: false,
-      onboardingCompletedAt: ''
+      onboardingCompletedAt: '',
+      saveHistory: true,
+      allowWebSummary: true,
+      cacheDocumentText: true
     },
     history: [],
     memory: []
@@ -401,6 +404,7 @@ function scoreText(text, query) {
 
 function saveHistory(query, scope, resultCount) {
   const db = readDb();
+  if (db.settings?.saveHistory === false) return;
   db.history.unshift({
     id: cryptoId(),
     query,
@@ -484,6 +488,10 @@ async function extractDocumentText(filePath) {
 async function getCachedDocumentText(filePath) {
   const stat = fs.statSync(filePath);
   const key = filePath;
+  const db = readDb();
+  if (db.settings?.cacheDocumentText === false) {
+    return extractDocumentText(filePath);
+  }
   const cache = readIndexCache();
   const cached = cache[key];
   if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) {
@@ -816,6 +824,12 @@ function getDataHealth() {
   if (!settings.includeContent) {
     addRecommendation('warning', '正文检索已关闭', '文件名还能搜，但 PDF、Word、Excel、文本正文不会参与匹配。', 'go-settings', '打开正文检索');
   }
+  if (settings.allowWebSummary === false) {
+    addRecommendation('info', '网页摘要已关闭', '软件不会在后台读取搜索结果摘要，但浏览器搜索仍可打开结果页。', 'go-settings', '查看隐私设置');
+  }
+  if (settings.saveHistory === false) {
+    addRecommendation('info', '检索历史已关闭', '新的检索不会写入历史列表。', 'go-settings', '查看隐私设置');
+  }
   if (failures.length) {
     addRecommendation('warning', `${failures.length} 条读取失败`, '通常是加密、损坏、权限不够或格式不标准的文件，可以在下面查看。', 'clear-failures', '清空旧记录');
   }
@@ -875,7 +889,10 @@ function getDataHealth() {
     settings: {
       includeContent: Boolean(settings.includeContent),
       maxResults: settings.maxResults || 80,
-      webEngine: settings.webEngine || 'bing'
+      webEngine: settings.webEngine || 'bing',
+      saveHistory: settings.saveHistory !== false,
+      allowWebSummary: settings.allowWebSummary !== false,
+      cacheDocumentText: settings.cacheDocumentText !== false
     },
     recommendations
   };
@@ -931,6 +948,18 @@ function parseBingResults(html) {
 
 async function searchWebResults(query, searchId = '') {
   assertSearchActive(searchId);
+  const db = readDb();
+  if (db.settings?.allowWebSummary === false) {
+    return [{
+      id: cryptoId(),
+      type: 'web-fallback',
+      title: '网页摘要已关闭',
+      source: getWebUrl(query),
+      content: '隐私设置里关闭了网页摘要。你仍然可以使用“浏览器搜索”打开结果页。',
+      createdAt: new Date().toISOString(),
+      score: 0
+    }];
+  }
   const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}`;
   const controller = new AbortController();
   let cancelTimer = null;
@@ -1107,6 +1136,7 @@ async function runSelfCheck() {
   let memoryCenterWorks = false;
   let professionalResultsWork = false;
   let onboardingWorks = false;
+  let privacySettingsWork = false;
   try {
     db.settings.searchFolders = Array.from(new Set([...originalFolders, selfCheckDir]));
     writeDb(db);
@@ -1173,11 +1203,26 @@ async function runSelfCheck() {
     onboardingWorks = typeof beforeOnboarding.shouldShow === 'boolean'
       && afterOnboarding.completed
       && Boolean(afterOnboarding.completedAt);
+    const privacyDb = readDb();
+    const historyCount = privacyDb.history.length;
+    privacyDb.settings.saveHistory = false;
+    privacyDb.settings.allowWebSummary = false;
+    privacyDb.settings.cacheDocumentText = false;
+    writeDb(privacyDb);
+    saveHistory('DustySearchPrivacyHistoryCheck', 'privacy', 1);
+    const webWhenDisabled = await searchWebResults('DustySearchPrivacyWebCheck');
+    const privacyAfter = readDb();
+    privacySettingsWork = privacyAfter.history.length === historyCount
+      && webWhenDisabled[0]?.title === '网页摘要已关闭'
+      && getDataHealth().settings.allowWebSummary === false;
   } finally {
     const restored = readDb();
     restored.settings.searchFolders = originalFolders;
     restored.settings.onboardingCompleted = db.settings.onboardingCompleted;
     restored.settings.onboardingCompletedAt = db.settings.onboardingCompletedAt || '';
+    restored.settings.saveHistory = db.settings.saveHistory !== false;
+    restored.settings.allowWebSummary = db.settings.allowWebSummary !== false;
+    restored.settings.cacheDocumentText = db.settings.cacheDocumentText !== false;
     restored.history = (restored.history || []).filter((item) => !looksMojibake(item.query));
     restored.memory = (restored.memory || []).filter((item) => item.source !== workbookPath);
     restored.memory = (restored.memory || []).filter((item) => item.source !== 'https://example.com/dustysearch-saved-result-check');
@@ -1206,6 +1251,7 @@ async function runSelfCheck() {
     memoryCenterWorks,
     professionalResultsWork,
     onboardingWorks,
+    privacySettingsWork,
     localIndexWorks: Boolean(localIndex && localIndex.itemCount > 0),
     searchFolders: restoredDb.settings.searchFolders.length,
     appInfoWorks: getAppInfo().name === APP_NAME && fs.existsSync(getAppInfo().appPath),
@@ -1441,7 +1487,10 @@ ipcMain.handle('settings:save', (_event, settings) => {
     webEngine: ['bing', 'google', 'duckduckgo'].includes(settings.webEngine) ? settings.webEngine : 'bing',
     maxResults: Math.max(10, Math.min(300, Number(settings.maxResults || db.settings.maxResults || 80))),
     onboardingCompleted: Boolean(settings.onboardingCompleted || db.settings.onboardingCompleted),
-    onboardingCompletedAt: settings.onboardingCompletedAt || db.settings.onboardingCompletedAt || ''
+    onboardingCompletedAt: settings.onboardingCompletedAt || db.settings.onboardingCompletedAt || '',
+    saveHistory: settings.saveHistory !== false,
+    allowWebSummary: settings.allowWebSummary !== false,
+    cacheDocumentText: settings.cacheDocumentText !== false
   };
   writeDb(db);
   return db.settings;
@@ -1494,6 +1543,17 @@ ipcMain.handle('history:clear', () => {
   db.history = [];
   writeDb(db);
   return [];
+});
+
+ipcMain.handle('privacy:clearDocumentCache', () => {
+  try {
+    if (fs.existsSync(INDEX_CACHE_PATH)) fs.rmSync(INDEX_CACHE_PATH, { force: true });
+    if (fs.existsSync(LOCAL_INDEX_PATH)) fs.rmSync(LOCAL_INDEX_PATH, { force: true });
+  } catch (error) {
+    logLine('clear document cache failed', error.message || String(error));
+    throw error;
+  }
+  return { cleared: true };
 });
 
 ipcMain.handle('data:openDir', () => {
