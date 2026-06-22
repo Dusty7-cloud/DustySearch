@@ -11,7 +11,8 @@ const state = {
   activeMode: 'all',
   activeSearchId: 0,
   progressTimer: null,
-  progressValue: 0
+  progressValue: 0,
+  renderedResults: new Map()
 };
 
 const MODE_LABELS = {
@@ -321,7 +322,10 @@ function renderResults(payload, mode = state.activeMode) {
   }
 
   list.className = 'list';
+  state.renderedResults = new Map();
   list.innerHTML = all.map((item) => {
+    const resultId = item.id || `${item.type}-${state.renderedResults.size}`;
+    state.renderedResults.set(resultId, item);
     const isFile = item.type === 'file';
     const source = isFile ? item.path : item.source;
     const meta = isFile
@@ -338,12 +342,14 @@ function renderResults(payload, mode = state.activeMode) {
         <div class="result-meta">${escapeHtml(source)}<br>${meta}</div>
         ${isFile ? `
           <div class="actions">
+            <button class="small-button save-result" data-result-id="${escapeAttr(resultId)}">收藏</button>
             <button class="small-button open-file" data-path="${escapeAttr(item.path)}">打开</button>
             <button class="small-button show-file" data-path="${escapeAttr(item.path)}">所在位置</button>
             <button class="small-button copy-source" data-source="${escapeAttr(source)}">复制路径</button>
           </div>
         ` : `
           <div class="actions">
+            <button class="small-button save-result" data-result-id="${escapeAttr(resultId)}">收藏</button>
             <button class="small-button open-source" data-source="${escapeAttr(source)}">打开来源</button>
             <button class="small-button copy-source" data-source="${escapeAttr(source)}">复制来源</button>
           </div>
@@ -481,6 +487,23 @@ document.addEventListener('click', async (event) => {
   if (copySource) {
     await window.dustySearch.copyText(copySource.dataset.source);
     setStatus('已复制。');
+  }
+
+  const saveResult = event.target.closest('.save-result');
+  if (saveResult) {
+    const item = state.renderedResults.get(saveResult.dataset.resultId);
+    if (!item) return setStatus('没有找到这条结果，重新检索后再试。');
+    saveResult.disabled = true;
+    try {
+      const saved = await window.dustySearch.saveResultToMemory(item);
+      saveResult.textContent = '已收藏';
+      await refreshState();
+      setStatus(`已收藏到记忆库：${saved.title}`);
+    } catch (error) {
+      setStatus(`收藏失败：${error.message || error}`);
+      saveResult.disabled = false;
+    }
+    return;
   }
 
   const removeFolder = event.target.closest('.remove-folder');
