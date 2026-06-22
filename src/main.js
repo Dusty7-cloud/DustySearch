@@ -731,9 +731,15 @@ function searchMemory(query, searchId = '') {
 function getMemorySummary(memory) {
   const categories = {};
   const tags = {};
+  const typeCounts = {};
+  let recentCount = 0;
+  const recentCutoff = Date.now() - 1000 * 60 * 60 * 24 * 7;
   for (const item of memory || []) {
     const category = item.category || guessCategory(item);
+    const typeKey = item.type === 'website' ? 'website' : item.type === 'saved-result' ? 'saved' : 'file';
     categories[category] = (categories[category] || 0) + 1;
+    typeCounts[typeKey] = (typeCounts[typeKey] || 0) + 1;
+    if (new Date(item.updatedAt || item.createdAt || 0).getTime() >= recentCutoff) recentCount += 1;
     for (const tag of item.tags || []) {
       tags[tag] = (tags[tag] || 0) + 1;
     }
@@ -741,7 +747,9 @@ function getMemorySummary(memory) {
   return {
     total: (memory || []).length,
     categories,
-    tags
+    tags,
+    typeCounts,
+    recentCount
   };
 }
 
@@ -1079,6 +1087,7 @@ async function runSelfCheck() {
   let saveResultWorks = false;
   let cancelSearchWorks = false;
   let dataHealthWorks = false;
+  let memoryCenterWorks = false;
   try {
     db.settings.searchFolders = Array.from(new Set([...originalFolders, selfCheckDir]));
     writeDb(db);
@@ -1124,6 +1133,10 @@ async function runSelfCheck() {
     dataHealthWorks = dataHealth.folders.total > 0
       && dataHealth.readableTypes.documents.includes('.pdf')
       && Array.isArray(dataHealth.recommendations);
+    const memorySummary = getMemorySummary(readDb().memory);
+    memoryCenterWorks = memorySummary.typeCounts.file >= 1
+      && memorySummary.typeCounts.website >= 1
+      && memorySummary.recentCount >= 1;
   } finally {
     const restored = readDb();
     restored.settings.searchFolders = originalFolders;
@@ -1152,6 +1165,7 @@ async function runSelfCheck() {
     saveResultWorks,
     cancelSearchWorks,
     dataHealthWorks,
+    memoryCenterWorks,
     localIndexWorks: Boolean(localIndex && localIndex.itemCount > 0),
     searchFolders: restoredDb.settings.searchFolders.length,
     appInfoWorks: getAppInfo().name === APP_NAME && fs.existsSync(getAppInfo().appPath),
@@ -1310,6 +1324,10 @@ ipcMain.handle('index:rebuild', async () => {
 });
 
 ipcMain.handle('item:open', (_event, targetPath) => {
+  if (/^https?:\/\//i.test(String(targetPath || ''))) {
+    shell.openExternal(targetPath);
+    return true;
+  }
   return shell.openPath(targetPath);
 });
 
