@@ -32,6 +32,7 @@ const DOCUMENT_EXTENSIONS = new Set(['.pdf', '.docx', '.xlsx', '.xls']);
 
 let mainWindow;
 const IS_SELF_CHECK = process.argv.includes('--self-check');
+const cancelledSearches = new Set();
 
 const gotLock = IS_SELF_CHECK || app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -64,6 +65,39 @@ function getAppInfo() {
     logPath: LOG_PATH,
     isInstalled: appPath.toLowerCase().includes(path.join('appdata', 'local', 'dustysearchapp'))
   };
+}
+
+function readSearchRequest(payload) {
+  if (payload && typeof payload === 'object') {
+    return {
+      query: String(payload.query || '').trim(),
+      searchId: String(payload.searchId || '').trim()
+    };
+  }
+  return {
+    query: String(payload || '').trim(),
+    searchId: ''
+  };
+}
+
+function cancelSearch(searchId) {
+  if (searchId) cancelledSearches.add(String(searchId));
+}
+
+function clearSearch(searchId) {
+  if (searchId) cancelledSearches.delete(String(searchId));
+}
+
+function assertSearchActive(searchId) {
+  if (searchId && cancelledSearches.has(String(searchId))) {
+    const error = new Error('检索已停止');
+    error.code = 'SEARCH_CANCELLED';
+    throw error;
+  }
+}
+
+function emptySearchResult() {
+  return { local: [], memory: [], web: [], webUrl: '' };
 }
 
 function logLine(message, detail = '') {
@@ -439,7 +473,8 @@ async function getCachedDocumentText(filePath) {
   return cache[key].text;
 }
 
-async function collectIndexItems(root, settings, items, startedAt) {
+async function collectIndexItems(root, settings, items, startedAt, searchId = '') {
+  assertSearchActive(searchId);
   if (Date.now() - startedAt > 45000) return;
 
   let entries = [];
@@ -450,11 +485,12 @@ async function collectIndexItems(root, settings, items, startedAt) {
   }
 
   for (const entry of entries) {
+    assertSearchActive(searchId);
     if (DEFAULT_IGNORES.has(entry.name)) continue;
     const fullPath = path.join(root, entry.name);
 
     if (entry.isDirectory()) {
-      await collectIndexItems(fullPath, settings, items, startedAt);
+      await collectIndexItems(fullPath, settings, items, startedAt, searchId);
       continue;
     }
 
@@ -488,7 +524,7 @@ async function collectIndexItems(root, settings, items, startedAt) {
   }
 }
 
-async function rebuildLocalIndex() {
+async function rebuildLocalIndex(searchId = '') {
   const db = readDb();
   const settings = {
     ...db.settings,
@@ -499,7 +535,8 @@ async function rebuildLocalIndex() {
   const startedAt = Date.now();
 
   for (const root of roots) {
-    await collectIndexItems(root, settings, items, startedAt);
+    assertSearchActive(searchId);
+    await collectIndexItems(root, settings, items, startedAt, searchId);
   }
 
   const index = {
@@ -514,19 +551,21 @@ async function rebuildLocalIndex() {
   return index;
 }
 
-async function getLocalIndexForSearch() {
+async function getLocalIndexForSearch(searchId = '') {
+  assertSearchActive(searchId);
   const db = readDb();
   const roots = (db.settings.searchFolders || []).filter((folder) => folder && fs.existsSync(folder));
   const index = readLocalIndex();
   if (isIndexUsable(index, roots)) return index;
-  return rebuildLocalIndex();
+  return rebuildLocalIndex(searchId);
 }
 
-function searchIndexItems(index, query, mode, maxResults) {
+function searchIndexItems(index, query, mode, maxResults, searchId = '') {
   const shouldSearchName = mode === 'all' || mode === 'name';
   const shouldSearchContent = mode === 'all' || mode === 'content';
   return (index.items || [])
     .map((item) => {
+      assertSearchActive(searchId);
       const nameScore = shouldSearchName ? scoreText(item.title, query) * 10 : 0;
       const contentScore = shouldSearchContent ? scoreText(item.content, query) : 0;
       const score = nameScore + contentScore;
@@ -547,7 +586,8 @@ function searchIndexItems(index, query, mode, maxResults) {
     .slice(0, maxResults);
 }
 
-async function walkFiles(root, query, settings, results, startedAt, mode = 'all') {
+async function walkFiles(root, query, settings, results, startedAt, mode = 'all', searchId = '') {
+  assertSearchActive(searchId);
   if (results.length >= settings.maxResults) return;
   if (Date.now() - startedAt > 12000) return;
 
@@ -559,12 +599,13 @@ async function walkFiles(root, query, settings, results, startedAt, mode = 'all'
   }
 
   for (const entry of entries) {
+    assertSearchActive(searchId);
     if (results.length >= settings.maxResults) break;
     if (DEFAULT_IGNORES.has(entry.name)) continue;
     const fullPath = path.join(root, entry.name);
 
     if (entry.isDirectory()) {
-      await walkFiles(fullPath, query, settings, results, startedAt);
+      await walkFiles(fullPath, query, settings, results, startedAt, mode, searchId);
       continue;
     }
 
@@ -581,7 +622,9 @@ async function walkFiles(root, query, settings, results, startedAt, mode = 'all'
       preview = readTextPreview(fullPath, query);
       contentScore = scoreText(preview, query);
     } else if (settings.includeContent && shouldSearchContent && DOCUMENT_EXTENSIONS.has(ext)) {
+      assertSearchActive(searchId);
       const text = await getCachedDocumentText(fullPath);
+      assertSearchActive(searchId);
       contentScore = scoreText(text, query);
       if (contentScore > 0) {
         preview = makePreview(text, query, path.dirname(fullPath));
@@ -612,20 +655,22 @@ async function walkFiles(root, query, settings, results, startedAt, mode = 'all'
   }
 }
 
-async function searchLocal(query) {
-  return searchFiles(query, 'all');
+async function searchLocal(query, searchId = '') {
+  return searchFiles(query, 'all', searchId);
 }
 
-async function searchFiles(query, mode) {
+async function searchFiles(query, mode, searchId = '') {
+  assertSearchActive(searchId);
   const db = readDb();
   const settings = {
     ...db.settings,
     maxResults: Number(db.settings.maxResults || 80)
   };
   try {
-    const index = await getLocalIndexForSearch();
-    return searchIndexItems(index, query, mode, settings.maxResults);
+    const index = await getLocalIndexForSearch(searchId);
+    return searchIndexItems(index, query, mode, settings.maxResults, searchId);
   } catch (error) {
+    if (error?.code === 'SEARCH_CANCELLED') throw error;
     logLine('indexed search failed, falling back', error.message || String(error));
   }
 
@@ -633,20 +678,25 @@ async function searchFiles(query, mode) {
   const results = [];
   const startedAt = Date.now();
   for (const root of roots) {
-    await walkFiles(root, query, settings, results, startedAt, mode);
+    assertSearchActive(searchId);
+    await walkFiles(root, query, settings, results, startedAt, mode, searchId);
   }
   results.sort((a, b) => b.score - a.score);
   return results.slice(0, settings.maxResults);
 }
 
-function searchMemory(query) {
+function searchMemory(query, searchId = '') {
+  assertSearchActive(searchId);
   const db = readDb();
   return (db.memory || [])
-    .map((item) => ({
-      ...item,
-      matchReason: '记忆库标题、来源或内容包含关键词',
-      score: scoreText(`${item.title} ${item.source} ${item.content}`, query)
-    }))
+    .map((item) => {
+      assertSearchActive(searchId);
+      return {
+        ...item,
+        matchReason: '记忆库标题、来源或内容包含关键词',
+        score: scoreText(`${item.title} ${item.source} ${item.content}`, query)
+      };
+    })
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, db.settings?.maxResults || 80);
@@ -717,20 +767,39 @@ function parseBingResults(html) {
   return results;
 }
 
-async function searchWebResults(query) {
+async function searchWebResults(query, searchId = '') {
+  assertSearchActive(searchId);
   const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}`;
+  const controller = new AbortController();
+  let cancelTimer = null;
+  if (searchId) {
+    cancelTimer = setInterval(() => {
+      if (cancelledSearches.has(String(searchId))) {
+        controller.abort();
+        clearInterval(cancelTimer);
+      }
+    }, 100);
+  }
   try {
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 DustySearch/1.0'
-      }
+      },
+      signal: controller.signal
     });
+    assertSearchActive(searchId);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const html = await response.text();
+    assertSearchActive(searchId);
     const results = parseBingResults(html);
     if (results.length) return results;
   } catch (error) {
+    if (error?.name === 'AbortError' || cancelledSearches.has(String(searchId))) {
+      assertSearchActive(searchId);
+    }
     logLine('web search failed', error.message || String(error));
+  } finally {
+    if (cancelTimer) clearInterval(cancelTimer);
   }
 
   return [{
@@ -871,6 +940,7 @@ async function runSelfCheck() {
   let csvExportWorks = false;
   let failureListWorks = false;
   let saveResultWorks = false;
+  let cancelSearchWorks = false;
   try {
     db.settings.searchFolders = Array.from(new Set([...originalFolders, selfCheckDir]));
     writeDb(db);
@@ -903,6 +973,15 @@ async function runSelfCheck() {
     fs.writeFileSync(brokenDocxPath, 'not a real docx', 'utf8');
     await extractDocumentText(brokenDocxPath);
     failureListWorks = readFailures().some((item) => item.path === brokenDocxPath);
+    const cancelCheckId = `self-check-cancel-${Date.now()}`;
+    cancelSearch(cancelCheckId);
+    try {
+      await searchFiles('DustySearchUniqueExcelText', 'content', cancelCheckId);
+    } catch (error) {
+      cancelSearchWorks = error?.code === 'SEARCH_CANCELLED';
+    } finally {
+      clearSearch(cancelCheckId);
+    }
   } finally {
     const restored = readDb();
     restored.settings.searchFolders = originalFolders;
@@ -929,6 +1008,7 @@ async function runSelfCheck() {
     csvExportWorks,
     failureListWorks,
     saveResultWorks,
+    cancelSearchWorks,
     localIndexWorks: Boolean(localIndex && localIndex.itemCount > 0),
     searchFolders: restoredDb.settings.searchFolders.length,
     appInfoWorks: getAppInfo().name === APP_NAME && fs.existsSync(getAppInfo().appPath),
@@ -974,47 +1054,97 @@ ipcMain.handle('app:getState', () => {
 });
 
 ipcMain.handle('search:all', async (_event, query) => {
-  const cleanQuery = String(query || '').trim();
-  if (!cleanQuery) return { local: [], memory: [], web: [], webUrl: '' };
-  const [local, memory, web] = await Promise.all([
-    searchLocal(cleanQuery),
-    Promise.resolve(searchMemory(cleanQuery)),
-    searchWebResults(cleanQuery)
-  ]);
-  saveHistory(cleanQuery, 'all', local.length + memory.length + web.length);
-  return { local, memory, web, webUrl: getWebUrl(cleanQuery) };
+  const { query: cleanQuery, searchId } = readSearchRequest(query);
+  if (!cleanQuery) return emptySearchResult();
+  clearSearch(searchId);
+  try {
+    const [local, memory, web] = await Promise.all([
+      searchLocal(cleanQuery, searchId),
+      Promise.resolve(searchMemory(cleanQuery, searchId)),
+      searchWebResults(cleanQuery, searchId)
+    ]);
+    assertSearchActive(searchId);
+    saveHistory(cleanQuery, 'all', local.length + memory.length + web.length);
+    return { local, memory, web, webUrl: getWebUrl(cleanQuery) };
+  } catch (error) {
+    if (error?.code === 'SEARCH_CANCELLED') return { ...emptySearchResult(), cancelled: true };
+    throw error;
+  } finally {
+    clearSearch(searchId);
+  }
 });
 
 ipcMain.handle('search:localName', async (_event, query) => {
-  const cleanQuery = String(query || '').trim();
-  if (!cleanQuery) return { local: [], memory: [], web: [], webUrl: '' };
-  const local = await searchFiles(cleanQuery, 'name');
-  saveHistory(cleanQuery, 'localName', local.length);
-  return { local, memory: [], web: [], webUrl: '' };
+  const { query: cleanQuery, searchId } = readSearchRequest(query);
+  if (!cleanQuery) return emptySearchResult();
+  clearSearch(searchId);
+  try {
+    const local = await searchFiles(cleanQuery, 'name', searchId);
+    assertSearchActive(searchId);
+    saveHistory(cleanQuery, 'localName', local.length);
+    return { local, memory: [], web: [], webUrl: '' };
+  } catch (error) {
+    if (error?.code === 'SEARCH_CANCELLED') return { ...emptySearchResult(), cancelled: true };
+    throw error;
+  } finally {
+    clearSearch(searchId);
+  }
 });
 
 ipcMain.handle('search:content', async (_event, query) => {
-  const cleanQuery = String(query || '').trim();
-  if (!cleanQuery) return { local: [], memory: [], web: [], webUrl: '' };
-  const local = await searchFiles(cleanQuery, 'content');
-  saveHistory(cleanQuery, 'content', local.length);
-  return { local, memory: [], web: [], webUrl: '' };
+  const { query: cleanQuery, searchId } = readSearchRequest(query);
+  if (!cleanQuery) return emptySearchResult();
+  clearSearch(searchId);
+  try {
+    const local = await searchFiles(cleanQuery, 'content', searchId);
+    assertSearchActive(searchId);
+    saveHistory(cleanQuery, 'content', local.length);
+    return { local, memory: [], web: [], webUrl: '' };
+  } catch (error) {
+    if (error?.code === 'SEARCH_CANCELLED') return { ...emptySearchResult(), cancelled: true };
+    throw error;
+  } finally {
+    clearSearch(searchId);
+  }
 });
 
 ipcMain.handle('search:memory', async (_event, query) => {
-  const cleanQuery = String(query || '').trim();
-  if (!cleanQuery) return { local: [], memory: [], web: [], webUrl: '' };
-  const memory = searchMemory(cleanQuery);
-  saveHistory(cleanQuery, 'memory', memory.length);
-  return { local: [], memory, web: [], webUrl: '' };
+  const { query: cleanQuery, searchId } = readSearchRequest(query);
+  if (!cleanQuery) return emptySearchResult();
+  clearSearch(searchId);
+  try {
+    const memory = searchMemory(cleanQuery, searchId);
+    assertSearchActive(searchId);
+    saveHistory(cleanQuery, 'memory', memory.length);
+    return { local: [], memory, web: [], webUrl: '' };
+  } catch (error) {
+    if (error?.code === 'SEARCH_CANCELLED') return { ...emptySearchResult(), cancelled: true };
+    throw error;
+  } finally {
+    clearSearch(searchId);
+  }
 });
 
 ipcMain.handle('search:webResults', async (_event, query) => {
-  const cleanQuery = String(query || '').trim();
-  if (!cleanQuery) return { local: [], memory: [], web: [], webUrl: '' };
-  const web = await searchWebResults(cleanQuery);
-  saveHistory(cleanQuery, 'webResults', web.length);
-  return { local: [], memory: [], web, webUrl: getWebUrl(cleanQuery) };
+  const { query: cleanQuery, searchId } = readSearchRequest(query);
+  if (!cleanQuery) return emptySearchResult();
+  clearSearch(searchId);
+  try {
+    const web = await searchWebResults(cleanQuery, searchId);
+    assertSearchActive(searchId);
+    saveHistory(cleanQuery, 'webResults', web.length);
+    return { local: [], memory: [], web, webUrl: getWebUrl(cleanQuery) };
+  } catch (error) {
+    if (error?.code === 'SEARCH_CANCELLED') return { ...emptySearchResult(), cancelled: true };
+    throw error;
+  } finally {
+    clearSearch(searchId);
+  }
+});
+
+ipcMain.handle('search:cancel', (_event, searchId) => {
+  cancelSearch(searchId);
+  return { cancelled: true };
 });
 
 ipcMain.handle('search:web', (_event, query) => {

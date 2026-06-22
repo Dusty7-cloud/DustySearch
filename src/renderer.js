@@ -386,20 +386,25 @@ async function runSearch(mode) {
   state.lastQuery = query;
   setActiveMode(mode);
   setStatus(`正在检索：${MODE_LABELS[mode]}...`);
-  const searchId = Date.now();
+  const searchId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   state.activeSearchId = searchId;
   startProgress(mode);
   setBusy(true);
 
   try {
     let result;
-    if (mode === 'local') result = await window.dustySearch.searchLocalName(query);
-    if (mode === 'content') result = await window.dustySearch.searchContent(query);
-    if (mode === 'memory') result = await window.dustySearch.searchMemoryOnly(query);
-    if (mode === 'web') result = await window.dustySearch.searchWebResults(query);
-    if (mode === 'all') result = await window.dustySearch.searchAll(query);
+    const request = { query, searchId };
+    if (mode === 'local') result = await window.dustySearch.searchLocalName(request);
+    if (mode === 'content') result = await window.dustySearch.searchContent(request);
+    if (mode === 'memory') result = await window.dustySearch.searchMemoryOnly(request);
+    if (mode === 'web') result = await window.dustySearch.searchWebResults(request);
+    if (mode === 'all') result = await window.dustySearch.searchAll(request);
 
     if (state.activeSearchId !== searchId) return;
+    if (result?.cancelled) {
+      setStatus('已停止本次检索。');
+      return;
+    }
     renderResults(result, mode);
     await refreshState();
     const count = (result.local || []).length + (result.memory || []).length + (result.web || []).length;
@@ -461,7 +466,9 @@ document.addEventListener('click', async (event) => {
   }
 
   if (event.target.closest('#stopSearch')) {
+    const searchId = state.activeSearchId;
     state.activeSearchId = 0;
+    if (searchId) await window.dustySearch.cancelSearch(searchId);
     stopProgress(false);
     setBusy(false);
     setStatus('已停止本次检索。');
