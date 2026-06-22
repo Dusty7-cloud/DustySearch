@@ -488,16 +488,52 @@ mark {
   color: rgba(255, 255, 255, 0.76);
 }
 
-.memory-list {
+.memory-overview {
   display: grid;
-  gap: 12px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.memory-stat {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(35, 39, 34, 0.04);
+}
+
+.memory-stat span,
+.memory-stat small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.memory-stat strong {
+  font-size: 24px;
 }
 
 .memory-tools {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 1.5fr) 180px 130px 150px minmax(180px, 1fr);
   gap: 10px;
   margin-bottom: 16px;
+}
+
+.memory-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.memory-list {
+  display: grid;
+  gap: 10px;
+  max-height: 620px;
+  overflow: auto;
 }
 
 .tag-cloud {
@@ -516,13 +552,41 @@ mark {
 }
 
 .memory-item {
-  display: flex;
-  justify-content: space-between;
-  gap: 18px;
+  display: block;
+  width: 100%;
+  text-align: left;
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+  cursor: pointer;
+}
+
+.memory-item:hover,
+.memory-item.active {
+  border-color: #bad3c8;
+  background: #f7fbf8;
+}
+
+.memory-item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: start;
+}
+
+.memory-item-head h3 {
+  min-width: 0;
+}
+
+.memory-item-head span,
+.memory-detail-top span {
+  border-radius: 999px;
+  background: #f1eee4;
+  color: #6f542b;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .memory-item p {
@@ -534,6 +598,14 @@ mark {
 .memory-item small {
   display: block;
   color: var(--amber);
+}
+
+.memory-preview {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-size: 13px;
 }
 
 .memory-meta-row {
@@ -573,6 +645,77 @@ mark {
 .memory-edit input {
   padding: 8px 10px;
   font-size: 13px;
+}
+
+.memory-detail {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px;
+}
+
+.memory-detail-top {
+  display: grid;
+  gap: 8px;
+}
+
+.memory-detail-top span {
+  width: fit-content;
+}
+
+.memory-detail-top p {
+  color: var(--muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.memory-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.memory-detail-edit {
+  grid-template-columns: 120px minmax(0, 1fr) 64px;
+  margin-top: 0;
+}
+
+.memory-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.memory-detail-meta div {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f7f4;
+}
+
+.memory-detail-meta span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.memory-detail-meta strong {
+  min-width: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.memory-detail-content {
+  max-height: 290px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfbf8;
+  color: #4f554c;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
 }
 
 .import-grid,
@@ -953,7 +1096,10 @@ mark {
   .search-box,
   .mode-buttons,
   .quick-start,
+  .memory-overview,
   .memory-tools,
+  .memory-workspace,
+  .memory-detail-meta,
   .content-grid,
   .import-grid,
   .settings-layout {
