@@ -1088,6 +1088,7 @@ async function runSelfCheck() {
   let cancelSearchWorks = false;
   let dataHealthWorks = false;
   let memoryCenterWorks = false;
+  let professionalResultsWork = false;
   try {
     db.settings.searchFolders = Array.from(new Set([...originalFolders, selfCheckDir]));
     writeDb(db);
@@ -1137,6 +1138,14 @@ async function runSelfCheck() {
     memoryCenterWorks = memorySummary.typeCounts.file >= 1
       && memorySummary.typeCounts.website >= 1
       && memorySummary.recentCount >= 1;
+    const resultBuckets = [
+      ...contentOnly.map((item) => ({ ...item, bucket: '正文结果' })),
+      ...memoryOnly.map((item) => ({ ...item, bucket: '记忆库' })),
+      ...web.map((item) => ({ ...item, bucket: '网页摘要' }))
+    ];
+    professionalResultsWork = resultBuckets.some((item) => item.bucket === '正文结果' && item.score > 0)
+      && resultBuckets.some((item) => item.bucket === '网页摘要')
+      && resultBuckets.every((item) => typeof item.title === 'string');
   } finally {
     const restored = readDb();
     restored.settings.searchFolders = originalFolders;
@@ -1166,6 +1175,7 @@ async function runSelfCheck() {
     cancelSearchWorks,
     dataHealthWorks,
     memoryCenterWorks,
+    professionalResultsWork,
     localIndexWorks: Boolean(localIndex && localIndex.itemCount > 0),
     searchFolders: restoredDb.settings.searchFolders.length,
     appInfoWorks: getAppInfo().name === APP_NAME && fs.existsSync(getAppInfo().appPath),
