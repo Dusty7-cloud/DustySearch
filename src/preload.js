@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('dustySearch', {
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   deleteMemory: (id) => ipcRenderer.invoke('memory:delete', id),
   updateMemoryMeta: (payload) => ipcRenderer.invoke('memory:updateMeta', payload),
+  saveResultToMemory: (result) => ipcRenderer.invoke('memory:saveResult', result),
   clearHistory: () => ipcRenderer.invoke('history:clear'),
   clearFailures: () => ipcRenderer.invoke('failures:clear'),
   openDataDir: () => ipcRenderer.invoke('data:openDir'),
