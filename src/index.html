@@ -37,8 +37,10 @@
             </div>
           </header>
 
+          <section id="homePulse" class="home-pulse" aria-label="软件状态"></section>
+
           <div class="search-box split-search">
-            <input id="queryInput" type="search" placeholder="输入关键词，比如：准考证、课程、笔记、网址标题" />
+            <input id="queryInput" type="search" placeholder="输入关键词，比如：准考证、课程、type:pdf、tag:项目" title="Ctrl+K" />
             <button id="searchAllButton">综合检索</button>
           </div>
 
@@ -50,6 +52,13 @@
             <button class="mode-button secondary-mode" data-mode="open-web">浏览器搜索</button>
           </div>
           <p class="search-hint">网页摘要会在软件里显示少量网页匹配；浏览器搜索会直接打开浏览器结果页。</p>
+          <div class="query-tools">
+            <button class="query-chip" data-query-chip="type:pdf">PDF</button>
+            <button class="query-chip" data-query-chip="type:word">Word</button>
+            <button class="query-chip" data-query-chip="type:excel">Excel</button>
+            <button class="query-chip" data-query-chip="type:image">图片</button>
+            <button class="query-chip" data-query-chip="tag:">标签</button>
+          </div>
 
           <div class="tool-row">
             <button id="rebuildIndex" class="small-button">刷新本地索引</button>
@@ -132,6 +141,7 @@
               <option value="file">文件</option>
               <option value="website">网站</option>
               <option value="saved">收藏</option>
+              <option value="ocr">图片文字</option>
             </select>
             <select id="memorySortFilter">
               <option value="updated-desc">最近更新</option>
@@ -202,6 +212,24 @@
                 <button id="addFolder" class="small-button">添加</button>
               </div>
               <div id="folderList" class="folder-list"></div>
+            </section>
+            <section class="panel workspace-panel">
+              <div class="panel-head">
+                <div>
+                  <h2>资料区</h2>
+                  <span>把不同用途的资料夹保存成一组，之后可以一键切换。</span>
+                </div>
+              </div>
+              <div class="workspace-tools">
+                <select id="workspaceSelect">
+                  <option value="">选择资料区</option>
+                </select>
+                <input id="workspaceName" type="text" placeholder="资料区名称，比如：学习、工作、证件" />
+                <button id="saveWorkspace" class="small-button">保存资料区</button>
+                <button id="applyWorkspace" class="small-button">切换</button>
+                <button id="deleteWorkspace" class="small-button danger-button">删除</button>
+              </div>
+              <p id="workspaceHint" class="data-tool-note">当前资料夹组合可以保存成资料区。</p>
             </section>
             <section class="panel settings-form">
               <label>
@@ -301,6 +329,17 @@
               <button id="exportMemoryCsv" class="small-button">导出 CSV</button>
             </div>
             <p class="data-tool-note">恢复会先自动备份当前数据，再覆盖为你选择的备份。</p>
+          </section>
+
+          <section class="panel data-tools">
+            <div class="panel-head">
+              <h2>跨电脑同步包</h2>
+            </div>
+            <div class="data-tool-grid">
+              <button id="exportSyncPackage" class="small-button">导出同步包</button>
+              <button id="importSyncPackage" class="small-button">导入同步包</button>
+            </div>
+            <p class="data-tool-note">同步包可以放到网盘或 U 盘，在另一台电脑导入后合并记忆库和资料区。</p>
           </section>
 
           <section class="panel data-tools">
