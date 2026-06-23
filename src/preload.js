@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('dustySearch', {
   copyText: (text) => ipcRenderer.invoke('text:copy', text),
   pickFolder: () => ipcRenderer.invoke('folder:pick'),
   pickImportFiles: () => ipcRenderer.invoke('file:pickImport'),
+  pickOcrImages: () => ipcRenderer.invoke('file:pickOcrImport'),
   importSite: (url) => ipcRenderer.invoke('site:import', url),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   completeOnboarding: () => ipcRenderer.invoke('onboarding:complete'),
