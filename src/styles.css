@@ -1170,6 +1170,38 @@ mark {
   padding: 16px 18px 0;
 }
 
+.cloud-sync-status {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  padding: 16px 18px 0;
+}
+
+.cloud-row {
+  display: grid;
+  gap: 5px;
+  min-height: 78px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f7f4;
+}
+
+.cloud-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cloud-row strong {
+  min-width: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.cloud-actions {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .info-list {
   display: grid;
   gap: 10px;
@@ -1386,6 +1418,11 @@ mark {
   }
 
   .data-tool-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cloud-sync-status,
+  .cloud-actions {
     grid-template-columns: 1fr;
   }
 
