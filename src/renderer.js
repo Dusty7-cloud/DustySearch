@@ -164,12 +164,14 @@ function renderHistory() {
 function getMemoryType(item) {
   if (item.type === 'website') return 'website';
   if (item.type === 'saved-result') return 'saved';
+  if (item.type === 'ocr-image') return 'ocr';
   return 'file';
 }
 
 function memoryTypeLabel(type) {
   if (type === 'website') return '网站';
   if (type === 'saved') return '收藏';
+  if (type === 'ocr') return '图片文字';
   return '文件';
 }
 
@@ -984,6 +986,17 @@ $('#importFiles').addEventListener('click', async () => {
     setStatus(imported.length ? `已导入 ${imported.length} 个文件。` : '没有选择文件。');
   } catch (error) {
     setStatus(`导入失败：${error.message || error}`);
+  }
+});
+
+$('#importOcrImages')?.addEventListener('click', async () => {
+  setStatus('正在识别图片文字，第一次会慢一点...');
+  try {
+    const imported = await window.dustySearch.pickOcrImages();
+    await refreshState();
+    setStatus(imported.length ? `OCR 已导入 ${imported.length} 张图片。` : '没有选择图片。');
+  } catch (error) {
+    setStatus(`OCR 识别失败：${error.message || error}`);
   }
 });
 
