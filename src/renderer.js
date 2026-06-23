@@ -370,7 +370,9 @@ function renderAppInfo() {
     ['版本', appInfo.version || '未知'],
     ['状态', appInfo.isInstalled ? '桌面安装版' : '开发预览版'],
     ['安装位置', appInfo.appPath || '未知'],
-    ['数据位置', appInfo.dataDir || '未知']
+    ['数据位置', appInfo.dataDir || '未知'],
+    ['一键自检', appInfo.hasSelfCheckTool ? '已准备好' : '重新安装后可用'],
+    ['安装说明', appInfo.hasInstallNote ? '已准备好' : '重新安装后可用']
   ];
   node.innerHTML = rows.map(([label, value]) => `
     <div class="info-row">
@@ -1123,6 +1125,24 @@ $('#openInstallDir')?.addEventListener('click', async () => {
     setStatus(`已打开安装位置：${opened}`);
   } catch (error) {
     setStatus(`打开安装位置失败：${error.message || error}`);
+  }
+});
+
+$('#openInstallNote')?.addEventListener('click', async () => {
+  try {
+    const opened = await window.dustySearch.openInstallNote();
+    setStatus(`已打开安装说明：${opened}`);
+  } catch (error) {
+    setStatus(`打开安装说明失败：${error.message || error}`);
+  }
+});
+
+$('#runSelfCheckTool')?.addEventListener('click', async () => {
+  try {
+    const opened = await window.dustySearch.runSelfCheckTool();
+    setStatus(`已打开一键自检：${opened}`);
+  } catch (error) {
+    setStatus(`一键自检打开失败：${error.message || error}`);
   }
 });
 

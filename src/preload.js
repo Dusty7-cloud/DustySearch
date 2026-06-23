@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('dustySearch', {
   clearDocumentCache: () => ipcRenderer.invoke('privacy:clearDocumentCache'),
   openDataDir: () => ipcRenderer.invoke('data:openDir'),
   openInstallDir: () => ipcRenderer.invoke('app:openInstallDir'),
+  openInstallNote: () => ipcRenderer.invoke('app:openInstallNote'),
+  runSelfCheckTool: () => ipcRenderer.invoke('app:runSelfCheckTool'),
   createBackup: () => ipcRenderer.invoke('backup:create'),
   restoreBackup: () => ipcRenderer.invoke('backup:restore'),
   exportMemory: (format) => ipcRenderer.invoke('backup:exportMemory', format)

@@ -65,6 +65,8 @@ function defaultDb() {
 
 function getAppInfo() {
   const appPath = app.getAppPath();
+  const selfCheckPath = path.join(appPath, 'Run-Self-Check.cmd');
+  const installNotePath = path.join(appPath, 'README-Open-Me.txt');
   return {
     name: APP_NAME,
     version: app.getVersion(),
@@ -72,6 +74,10 @@ function getAppInfo() {
     dataDir: DATA_DIR,
     dbPath: DB_PATH,
     logPath: LOG_PATH,
+    selfCheckPath,
+    installNotePath,
+    hasSelfCheckTool: fs.existsSync(selfCheckPath),
+    hasInstallNote: fs.existsSync(installNotePath),
     isInstalled: appPath.toLowerCase().includes(path.join('appdata', 'local', 'dustysearchapp'))
   };
 }
@@ -1705,6 +1711,25 @@ ipcMain.handle('app:openInstallDir', () => {
   const appPath = app.getAppPath();
   shell.openPath(appPath);
   return appPath;
+});
+
+ipcMain.handle('app:openInstallNote', () => {
+  const notePath = getAppInfo().installNotePath;
+  if (fs.existsSync(notePath)) {
+    shell.openPath(notePath);
+    return notePath;
+  }
+  shell.openPath(getAppInfo().appPath);
+  return getAppInfo().appPath;
+});
+
+ipcMain.handle('app:runSelfCheckTool', () => {
+  const selfCheckPath = getAppInfo().selfCheckPath;
+  if (!fs.existsSync(selfCheckPath)) {
+    throw new Error('当前版本还没有一键自检工具，请先重新安装桌面版。');
+  }
+  shell.openPath(selfCheckPath);
+  return selfCheckPath;
 });
 
 ipcMain.handle('failures:clear', () => {
