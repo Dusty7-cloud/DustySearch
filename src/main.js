@@ -56,7 +56,9 @@ function defaultDb() {
       onboardingCompletedAt: '',
       saveHistory: true,
       allowWebSummary: true,
-      cacheDocumentText: true
+      cacheDocumentText: true,
+      workspaces: [],
+      activeWorkspaceId: ''
     },
     history: [],
     memory: []
@@ -310,6 +312,141 @@ function restoreBackup(backupPath) {
   return true;
 }
 
+function sanitizeWorkspace(workspace) {
+  const folders = Array.from(new Set(workspace?.folders || []))
+    .map((folder) => String(folder || '').trim())
+    .filter(Boolean);
+  return {
+    id: String(workspace?.id || cryptoId()),
+    name: String(workspace?.name || '未命名资料区').trim().slice(0, 40) || '未命名资料区',
+    folders,
+    createdAt: workspace?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function saveWorkspace(payload) {
+  const db = readDb();
+  const settings = db.settings || {};
+  const workspace = sanitizeWorkspace({
+    id: payload?.id,
+    name: payload?.name,
+    folders: payload?.folders || settings.searchFolders || [],
+    createdAt: payload?.createdAt
+  });
+  const workspaces = Array.isArray(settings.workspaces) ? settings.workspaces : [];
+  const existingIndex = workspaces.findIndex((item) => item.id === workspace.id);
+  if (existingIndex >= 0) {
+    workspace.createdAt = workspaces[existingIndex].createdAt || workspace.createdAt;
+    workspaces.splice(existingIndex, 1, workspace);
+  } else {
+    workspaces.unshift(workspace);
+  }
+  db.settings.workspaces = workspaces.slice(0, 30);
+  db.settings.activeWorkspaceId = workspace.id;
+  writeDb(db);
+  return db.settings;
+}
+
+function applyWorkspace(workspaceId) {
+  const db = readDb();
+  const workspaces = Array.isArray(db.settings?.workspaces) ? db.settings.workspaces : [];
+  const workspace = workspaces.find((item) => item.id === workspaceId);
+  if (!workspace) throw new Error('没有找到这个资料区。');
+  db.settings.searchFolders = Array.from(new Set(workspace.folders || [])).filter(Boolean);
+  db.settings.activeWorkspaceId = workspace.id;
+  writeDb(db);
+  return db.settings;
+}
+
+function deleteWorkspace(workspaceId) {
+  const db = readDb();
+  db.settings.workspaces = (db.settings?.workspaces || []).filter((item) => item.id !== workspaceId);
+  if (db.settings.activeWorkspaceId === workspaceId) db.settings.activeWorkspaceId = '';
+  writeDb(db);
+  return db.settings;
+}
+
+function mergeMemoryItems(current, incoming) {
+  const bySource = new Map();
+  for (const item of current || []) {
+    bySource.set(`${item.source || item.id || cryptoId()}|${item.type || ''}`, item);
+  }
+  for (const item of incoming || []) {
+    if (!item || !item.source) continue;
+    const key = `${item.source}|${item.type || ''}`;
+    const existing = bySource.get(key);
+    if (!existing) {
+      bySource.set(key, {
+        ...item,
+        id: item.id || cryptoId(),
+        createdAt: item.createdAt || new Date().toISOString(),
+        updatedAt: item.updatedAt || item.createdAt || new Date().toISOString()
+      });
+      continue;
+    }
+    const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+    const incomingTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
+    if (incomingTime >= existingTime) {
+      bySource.set(key, {
+        ...existing,
+        ...item,
+        id: existing.id || item.id || cryptoId(),
+        createdAt: existing.createdAt || item.createdAt || new Date().toISOString(),
+        updatedAt: item.updatedAt || existing.updatedAt || new Date().toISOString()
+      });
+    }
+  }
+  return Array.from(bySource.values()).sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+}
+
+function mergeWorkspaces(current, incoming) {
+  const map = new Map();
+  for (const workspace of current || []) {
+    const safe = sanitizeWorkspace(workspace);
+    safe.createdAt = workspace.createdAt || safe.createdAt;
+    safe.updatedAt = workspace.updatedAt || safe.updatedAt;
+    map.set(safe.id, safe);
+  }
+  for (const workspace of incoming || []) {
+    const safe = sanitizeWorkspace(workspace);
+    const existing = map.get(safe.id);
+    if (!existing || new Date(safe.updatedAt || 0) >= new Date(existing.updatedAt || 0)) {
+      map.set(safe.id, safe);
+    }
+  }
+  return Array.from(map.values()).slice(0, 30);
+}
+
+function syncPackageContent() {
+  const db = readDb();
+  return {
+    app: APP_NAME,
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    memory: db.memory || [],
+    settings: {
+      workspaces: db.settings?.workspaces || []
+    }
+  };
+}
+
+function importSyncPackage(filePath) {
+  const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  if (payload.app !== APP_NAME || !Array.isArray(payload.memory)) {
+    throw new Error('这不是 DustySearch 的同步包。');
+  }
+  createBackup('before-sync-import');
+  const db = readDb();
+  db.memory = mergeMemoryItems(db.memory, payload.memory);
+  db.settings.workspaces = mergeWorkspaces(db.settings.workspaces || [], payload.settings?.workspaces || []);
+  writeDb(db);
+  return {
+    memoryCount: db.memory.length,
+    workspaceCount: db.settings.workspaces.length
+  };
+}
+
 function memoryToCsv(memory) {
   const headers = ['title', 'source', 'type', 'category', 'tags', 'createdAt', 'updatedAt'];
   const escapeCell = (value) => `"${String(value || '').replace(/"/g, '""')}"`;
@@ -415,6 +552,129 @@ function scoreText(text, query) {
     if (hay.includes(term)) score += term.length;
   }
   return score;
+}
+
+function normalizeExtension(value) {
+  const clean = String(value || '').trim().toLowerCase().replace(/^\./, '');
+  return clean ? `.${clean}` : '';
+}
+
+function expandTypeFilter(value) {
+  const type = String(value || '').trim().toLowerCase();
+  if (!type) return { extensions: [], memoryTypes: [] };
+  const textExtensions = Array.from(TEXT_EXTENSIONS);
+  const imageExtensions = Array.from(IMAGE_EXTENSIONS);
+  const maps = {
+    pdf: { extensions: ['.pdf'], memoryTypes: [] },
+    word: { extensions: ['.doc', '.docx'], memoryTypes: [] },
+    doc: { extensions: ['.doc', '.docx'], memoryTypes: [] },
+    docx: { extensions: ['.docx'], memoryTypes: [] },
+    excel: { extensions: ['.xls', '.xlsx', '.csv'], memoryTypes: [] },
+    sheet: { extensions: ['.xls', '.xlsx', '.csv'], memoryTypes: [] },
+    xlsx: { extensions: ['.xlsx'], memoryTypes: [] },
+    text: { extensions: textExtensions, memoryTypes: [] },
+    txt: { extensions: ['.txt', '.md'], memoryTypes: [] },
+    image: { extensions: imageExtensions, memoryTypes: [] },
+    img: { extensions: imageExtensions, memoryTypes: [] },
+    picture: { extensions: imageExtensions, memoryTypes: [] },
+    website: { extensions: [], memoryTypes: ['website'] },
+    web: { extensions: [], memoryTypes: ['website'] },
+    site: { extensions: [], memoryTypes: ['website'] },
+    ocr: { extensions: imageExtensions, memoryTypes: ['ocr'] },
+    saved: { extensions: [], memoryTypes: ['saved'] },
+    favorite: { extensions: [], memoryTypes: ['saved'] },
+    file: { extensions: [], memoryTypes: ['file'] },
+    document: { extensions: ['.pdf', '.doc', '.docx', '.txt', '.md'], memoryTypes: ['file'] }
+  };
+  return maps[type] || { extensions: [normalizeExtension(type)].filter(Boolean), memoryTypes: [] };
+}
+
+function parseSearchQuery(rawQuery) {
+  const raw = String(rawQuery || '').trim();
+  const filters = {
+    extensions: new Set(),
+    memoryTypes: new Set(),
+    categories: [],
+    tags: []
+  };
+  const textParts = [];
+  const tokens = raw.match(/"[^"]+"|\S+/g) || [];
+
+  for (const token of tokens) {
+    const cleanToken = token.replace(/^"|"$/g, '');
+    const match = cleanToken.match(/^(type|ext|tag|cat|category|分类|标签):(.+)$/i);
+    if (!match) {
+      textParts.push(cleanToken);
+      continue;
+    }
+
+    const key = match[1].toLowerCase();
+    const value = match[2].trim();
+    if (!value) continue;
+
+    if (key === 'type') {
+      const expanded = expandTypeFilter(value);
+      expanded.extensions.forEach((ext) => filters.extensions.add(ext));
+      expanded.memoryTypes.forEach((type) => filters.memoryTypes.add(type));
+      continue;
+    }
+    if (key === 'ext') {
+      const ext = normalizeExtension(value);
+      if (ext) filters.extensions.add(ext);
+      continue;
+    }
+    if (key === 'tag' || key === '标签') {
+      filters.tags.push(value.toLowerCase());
+      continue;
+    }
+    if (key === 'cat' || key === 'category' || key === '分类') {
+      filters.categories.push(value.toLowerCase());
+    }
+  }
+
+  const text = textParts.join(' ').trim();
+  return {
+    raw,
+    text,
+    hasText: Boolean(text),
+    hasFilters: Boolean(filters.extensions.size || filters.memoryTypes.size || filters.categories.length || filters.tags.length),
+    extensions: Array.from(filters.extensions),
+    memoryTypes: Array.from(filters.memoryTypes),
+    categories: filters.categories,
+    tags: filters.tags
+  };
+}
+
+function itemExtension(item) {
+  return normalizeExtension(item.ext || path.extname(item.path || item.source || item.title || ''));
+}
+
+function memoryTypeKey(item) {
+  if (item.type === 'website') return 'website';
+  if (item.type === 'saved-result') return 'saved';
+  if (item.type === 'ocr-image') return 'ocr';
+  return 'file';
+}
+
+function matchesFileFilters(item, parsed) {
+  if (parsed.categories.length || parsed.tags.length) return false;
+  if (parsed.memoryTypes.length && !parsed.memoryTypes.includes('file')) return false;
+  if (!parsed.extensions.length) return true;
+  return parsed.extensions.includes(itemExtension(item));
+}
+
+function matchesMemoryFilters(item, parsed) {
+  if (parsed.extensions.length && !parsed.extensions.includes(itemExtension(item))) return false;
+  if (parsed.memoryTypes.length && !parsed.memoryTypes.includes(memoryTypeKey(item))) return false;
+  if (parsed.categories.length) {
+    const category = normalizeText(item.category || guessCategory(item));
+    if (!parsed.categories.some((wanted) => category.includes(wanted))) return false;
+  }
+  if (parsed.tags.length) {
+    const tags = (item.tags || []).map((tag) => normalizeText(tag));
+    if (!parsed.tags.every((wanted) => tags.some((tag) => tag.includes(wanted)))) return false;
+  }
+  return true;
 }
 
 function saveHistory(query, scope, resultCount) {
@@ -612,27 +872,31 @@ async function getLocalIndexForSearch(searchId = '') {
 }
 
 function searchIndexItems(index, query, mode, maxResults, searchId = '') {
+  const parsed = parseSearchQuery(query);
+  const queryText = parsed.text || parsed.raw;
   const shouldSearchName = mode === 'all' || mode === 'name';
   const shouldSearchContent = mode === 'all' || mode === 'content';
   return (index.items || [])
     .map((item) => {
       assertSearchActive(searchId);
-      const nameScore = shouldSearchName ? scoreText(item.title, query) * 10 : 0;
-      const contentScore = shouldSearchContent ? scoreText(item.content, query) : 0;
-      const score = nameScore + contentScore;
+      if (!matchesFileFilters(item, parsed)) return null;
+      const nameScore = parsed.hasText && shouldSearchName ? scoreText(`${item.title} ${item.path}`, queryText) * 10 : 0;
+      const contentScore = parsed.hasText && shouldSearchContent ? scoreText(item.content, queryText) : 0;
+      const filterScore = parsed.hasFilters ? 1 : 0;
+      const score = nameScore + contentScore + filterScore;
       return {
         id: cryptoId(),
         type: 'file',
         title: item.title,
         path: item.path,
-        detail: contentScore > 0 ? makePreview(item.content, query, item.dir) : item.dir,
-        matchReason: contentScore > 0 ? '正文里包含关键词' : '文件名或路径包含关键词',
+        detail: contentScore > 0 ? makePreview(item.content, queryText, item.dir) : item.dir,
+        matchReason: contentScore > 0 ? '正文里包含关键词' : parsed.hasFilters && !parsed.hasText ? '符合搜索筛选条件' : '文件名或路径包含关键词',
         size: item.size,
         updatedAt: item.updatedAt,
         score
       };
     })
-    .filter((item) => item.score > 0)
+    .filter((item) => item && item.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, maxResults);
 }
@@ -649,6 +913,9 @@ async function walkFiles(root, query, settings, results, startedAt, mode = 'all'
     return;
   }
 
+  const parsed = parseSearchQuery(query);
+  const queryText = parsed.text || parsed.raw;
+
   for (const entry of entries) {
     assertSearchActive(searchId);
     if (results.length >= settings.maxResults) break;
@@ -663,26 +930,27 @@ async function walkFiles(root, query, settings, results, startedAt, mode = 'all'
     if (!entry.isFile()) continue;
 
     const ext = path.extname(entry.name).toLowerCase();
-    const nameScore = scoreText(entry.name, query) * 10;
+    if (!matchesFileFilters({ ext, path: fullPath, title: entry.name }, parsed)) continue;
+    const nameScore = parsed.hasText ? scoreText(`${entry.name} ${fullPath}`, queryText) * 10 : 0;
     let contentScore = 0;
     let preview = '';
     const shouldSearchName = mode === 'all' || mode === 'name';
     const shouldSearchContent = mode === 'all' || mode === 'content';
 
     if (settings.includeContent && shouldSearchContent && TEXT_EXTENSIONS.has(ext)) {
-      preview = readTextPreview(fullPath, query);
-      contentScore = scoreText(preview, query);
+      preview = readTextPreview(fullPath, queryText);
+      contentScore = parsed.hasText ? scoreText(preview, queryText) : 0;
     } else if (settings.includeContent && shouldSearchContent && DOCUMENT_EXTENSIONS.has(ext)) {
       assertSearchActive(searchId);
       const text = await getCachedDocumentText(fullPath);
       assertSearchActive(searchId);
-      contentScore = scoreText(text, query);
+      contentScore = parsed.hasText ? scoreText(text, queryText) : 0;
       if (contentScore > 0) {
-        preview = makePreview(text, query, path.dirname(fullPath));
+        preview = makePreview(text, queryText, path.dirname(fullPath));
       }
     }
 
-    const total = (shouldSearchName ? nameScore : 0) + contentScore;
+    const total = (shouldSearchName ? nameScore : 0) + contentScore + (parsed.hasFilters ? 1 : 0);
     if (total > 0) {
       let stat;
       try {
@@ -697,7 +965,7 @@ async function walkFiles(root, query, settings, results, startedAt, mode = 'all'
         title: entry.name,
         path: fullPath,
         detail: preview || path.dirname(fullPath),
-        matchReason: contentScore > 0 ? '正文里包含关键词' : '文件名或路径包含关键词',
+        matchReason: contentScore > 0 ? '正文里包含关键词' : parsed.hasFilters && !parsed.hasText ? '符合搜索筛选条件' : '文件名或路径包含关键词',
         size: stat.size,
         updatedAt: stat.mtime,
         score: total
@@ -739,16 +1007,23 @@ async function searchFiles(query, mode, searchId = '') {
 function searchMemory(query, searchId = '') {
   assertSearchActive(searchId);
   const db = readDb();
+  const parsed = parseSearchQuery(query);
+  const queryText = parsed.text || parsed.raw;
   return (db.memory || [])
     .map((item) => {
       assertSearchActive(searchId);
+      if (!matchesMemoryFilters(item, parsed)) return null;
+      const textScore = parsed.hasText
+        ? scoreText(`${item.title} ${item.source} ${item.category || ''} ${(item.tags || []).join(' ')} ${item.content}`, queryText)
+        : 0;
+      const filterScore = parsed.hasFilters ? 1 : 0;
       return {
         ...item,
-        matchReason: '记忆库标题、来源或内容包含关键词',
-        score: scoreText(`${item.title} ${item.source} ${item.content}`, query)
+        matchReason: textScore > 0 ? '记忆库标题、来源、标签或内容包含关键词' : '符合记忆库筛选条件',
+        score: textScore + filterScore
       };
     })
-    .filter((item) => item.score > 0)
+    .filter((item) => item && item.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, db.settings?.maxResults || 80);
 }
@@ -1228,9 +1503,14 @@ async function runSelfCheck() {
   markSelfCheck('workbook');
   const originalFolders = db.settings.searchFolders;
   const originalIncludeContent = db.settings.includeContent !== false;
+  const originalWorkspaces = db.settings.workspaces || [];
+  const originalActiveWorkspaceId = db.settings.activeWorkspaceId || '';
   let localName = [];
   let contentOnly = [];
   let memoryOnly = [];
+  let syntaxFilterWorks = false;
+  let workspaceWorks = false;
+  let syncPackageWorks = false;
   let memoryMetaWorks = false;
   let memoryDedupeWorks = false;
   let backupWorks = false;
@@ -1245,7 +1525,7 @@ async function runSelfCheck() {
   let privacySettingsWork = false;
   let ocrWorks = false;
   try {
-    db.settings.searchFolders = Array.from(new Set([...originalFolders, selfCheckDir]));
+    db.settings.searchFolders = [selfCheckDir];
     db.settings.includeContent = true;
     writeDb(db);
     await rebuildLocalIndex();
@@ -1274,6 +1554,39 @@ async function runSelfCheck() {
     writeDb(withImport);
     const updated = readDb().memory.find((item) => item.source === workbookPath);
     memoryMetaWorks = updated?.category === '自检' && updated.tags?.includes('测试');
+    const xlsxSyntax = await searchFiles('type:xlsx DustySearchUniqueExcelText', 'content');
+    const tagSyntax = searchMemory('tag:测试 cat:自检 DustySearchUniqueExcelText');
+    syntaxFilterWorks = xlsxSyntax.some((item) => item.path === workbookPath)
+      && tagSyntax.some((item) => item.source === workbookPath);
+    const workspaceSettings = saveWorkspace({
+      id: 'self-check-workspace',
+      name: '自检资料区',
+      folders: [selfCheckDir]
+    });
+    const appliedWorkspace = applyWorkspace('self-check-workspace');
+    workspaceWorks = workspaceSettings.workspaces.some((item) => item.id === 'self-check-workspace')
+      && appliedWorkspace.searchFolders.length === 1
+      && appliedWorkspace.searchFolders[0] === selfCheckDir;
+    markSelfCheck('workspace');
+    const packagePath = path.join(selfCheckDir, 'sync-package.json');
+    fs.writeFileSync(packagePath, JSON.stringify({
+      ...syncPackageContent(),
+      memory: [{
+        id: 'self-check-sync-memory',
+        type: 'saved-result',
+        title: 'DustySearch Sync Check',
+        source: 'https://example.com/dustysearch-sync-check',
+        category: '自检',
+        tags: ['同步'],
+        content: 'DustySearchSyncMarker',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }]
+    }, null, 2), 'utf8');
+    const syncSummary = importSyncPackage(packagePath);
+    syncPackageWorks = syncSummary.memoryCount >= 1
+      && readDb().memory.some((item) => item.source === 'https://example.com/dustysearch-sync-check');
+    markSelfCheck('sync-package');
     const backupPath = createBackup('self-check');
     backupWorks = fs.existsSync(path.join(backupPath, 'memory.json'))
       && fs.existsSync(path.join(backupPath, 'backup-info.json'));
@@ -1348,9 +1661,12 @@ async function runSelfCheck() {
     restored.settings.saveHistory = db.settings.saveHistory !== false;
     restored.settings.allowWebSummary = db.settings.allowWebSummary !== false;
     restored.settings.cacheDocumentText = db.settings.cacheDocumentText !== false;
+    restored.settings.workspaces = originalWorkspaces;
+    restored.settings.activeWorkspaceId = originalActiveWorkspaceId;
     restored.history = (restored.history || []).filter((item) => !looksMojibake(item.query));
     restored.memory = (restored.memory || []).filter((item) => item.source !== workbookPath);
     restored.memory = (restored.memory || []).filter((item) => item.source !== 'https://example.com/dustysearch-saved-result-check');
+    restored.memory = (restored.memory || []).filter((item) => item.source !== 'https://example.com/dustysearch-sync-check');
     restored.memory = (restored.memory || []).filter((item) => !String(item.source || '').includes('ocr-self-check'));
     writeDb(restored);
     writeFailures(readFailures().filter((item) => !String(item.path || '').includes('broken-self-check.docx') && !String(item.path || '').includes('ocr-self-check')));
@@ -1364,9 +1680,12 @@ async function runSelfCheck() {
     webCount: web.length,
     hasWebSource: web.some((item) => /^https?:\/\//.test(item.source)),
     documentTextMatch: workbookText.includes('DustySearchUniqueExcelText'),
-    localNameModeWorks: Array.isArray(localName),
+    localNameModeWorks: localName.some((item) => item.path === workbookPath),
     contentModeWorks: contentOnly.some((item) => item.path === workbookPath),
     memoryModeWorks: Array.isArray(memoryOnly),
+    syntaxFilterWorks,
+    workspaceWorks,
+    syncPackageWorks,
     memoryDedupeWorks,
     memoryMetaWorks,
     backupWorks,
@@ -1636,10 +1955,24 @@ ipcMain.handle('settings:save', (_event, settings) => {
     onboardingCompletedAt: settings.onboardingCompletedAt || db.settings.onboardingCompletedAt || '',
     saveHistory: settings.saveHistory !== false,
     allowWebSummary: settings.allowWebSummary !== false,
-    cacheDocumentText: settings.cacheDocumentText !== false
+    cacheDocumentText: settings.cacheDocumentText !== false,
+    workspaces: Array.isArray(settings.workspaces) ? settings.workspaces.map(sanitizeWorkspace).slice(0, 30) : (db.settings.workspaces || []),
+    activeWorkspaceId: String(settings.activeWorkspaceId || db.settings.activeWorkspaceId || '')
   };
   writeDb(db);
   return db.settings;
+});
+
+ipcMain.handle('workspace:save', (_event, payload) => {
+  return saveWorkspace(payload || {});
+});
+
+ipcMain.handle('workspace:apply', (_event, workspaceId) => {
+  return applyWorkspace(String(workspaceId || ''));
+});
+
+ipcMain.handle('workspace:delete', (_event, workspaceId) => {
+  return deleteWorkspace(String(workspaceId || ''));
 });
 
 ipcMain.handle('onboarding:complete', () => {
@@ -1768,6 +2101,28 @@ ipcMain.handle('backup:exportMemory', async (_event, format) => {
     : JSON.stringify({ exportedAt: new Date().toISOString(), memory: db.memory }, null, 2);
   fs.writeFileSync(result.filePath, content, 'utf8');
   return { exported: true, filePath: result.filePath };
+});
+
+ipcMain.handle('sync:exportPackage', async () => {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: '导出 DustySearch 同步包',
+    defaultPath: path.join(app.getPath('desktop'), `DustySearch-sync-${timestampName()}.json`),
+    filters: [{ name: 'DustySearch 同步包', extensions: ['json'] }]
+  });
+  if (result.canceled || !result.filePath) return { exported: false };
+  fs.writeFileSync(result.filePath, JSON.stringify(syncPackageContent(), null, 2), 'utf8');
+  return { exported: true, filePath: result.filePath };
+});
+
+ipcMain.handle('sync:importPackage', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '导入 DustySearch 同步包',
+    properties: ['openFile'],
+    filters: [{ name: 'DustySearch 同步包', extensions: ['json'] }]
+  });
+  if (result.canceled || !result.filePaths[0]) return { imported: false };
+  const summary = importSyncPackage(result.filePaths[0]);
+  return { imported: true, filePath: result.filePaths[0], ...summary };
 });
 
 ipcMain.handle('dev:selfCheck', async () => {
