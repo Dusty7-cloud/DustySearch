@@ -24,7 +24,8 @@ const MODE_LABELS = {
   local: '本地文件名',
   content: '正文检索',
   memory: '记忆库',
-  web: '网页摘要'
+  web: '网页摘要',
+  'open-web': '浏览器搜索'
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -358,8 +359,28 @@ function renderSettings() {
   $('#saveHistory').checked = state.settings.saveHistory !== false;
   $('#allowWebSummary').checked = state.settings.allowWebSummary !== false;
   $('#cacheDocumentText').checked = state.settings.cacheDocumentText !== false;
+  renderWorkspaces();
   renderAppInfo();
   renderFolders();
+}
+
+function renderWorkspaces() {
+  const select = $('#workspaceSelect');
+  const nameInput = $('#workspaceName');
+  const hint = $('#workspaceHint');
+  if (!select) return;
+  const workspaces = state.settings.workspaces || [];
+  select.innerHTML = '<option value="">选择资料区</option>' + workspaces.map((workspace) => (
+    `<option value="${escapeAttr(workspace.id)}">${escapeHtml(workspace.name)}（${(workspace.folders || []).length} 个资料夹）</option>`
+  )).join('');
+  select.value = state.settings.activeWorkspaceId || '';
+  const active = workspaces.find((workspace) => workspace.id === select.value);
+  if (nameInput && active) nameInput.value = active.name;
+  if (hint) {
+    hint.textContent = active
+      ? `当前资料区：${active.name}。包含 ${(active.folders || []).length} 个资料夹。`
+      : `当前资料夹组合可以保存成资料区。`;
+  }
 }
 
 function renderAppInfo() {
@@ -390,6 +411,25 @@ function renderIndexStatus() {
     return;
   }
   node.textContent = `当前索引：${state.localIndex.itemCount} 个文件 · ${formatDate(state.localIndex.builtAt)}`;
+}
+
+function renderHomePulse() {
+  const node = $('#homePulse');
+  if (!node) return;
+  const health = state.dataHealth || {};
+  const cards = [
+    ['本地索引', state.localIndex ? `${state.localIndex.itemCount || 0}` : '待刷新', state.localIndex ? '已准备检索' : '首次检索会自动建立', 'index'],
+    ['记忆库', `${state.memorySummary.total || 0}`, '导入和收藏的资料', 'memory'],
+    ['资料健康', health.score ? `${health.score}` : '待体检', health.statusText || '打开设置可查看体检', health.status || 'info'],
+    ['当前版本', state.appInfo.isInstalled ? '桌面版' : '预览版', state.appInfo.hasSelfCheckTool ? '一键自检已准备' : '重新安装后有自检工具', 'app']
+  ];
+  node.innerHTML = cards.map(([label, value, hint, tone]) => `
+    <div class="pulse-card ${escapeAttr(tone)}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <small>${escapeHtml(hint)}</small>
+    </div>
+  `).join('');
 }
 
 function healthLevelLabel(level) {
@@ -544,6 +584,16 @@ function getResultScoreLabel(percent, item) {
   return '低匹配';
 }
 
+function describeQuerySyntax(query) {
+  const filters = [];
+  const text = String(query || '');
+  if (/\btype:/i.test(text)) filters.push('类型筛选');
+  if (/\bext:/i.test(text)) filters.push('后缀筛选');
+  if (/(^|\s)(tag|标签):/i.test(text)) filters.push('标签筛选');
+  if (/(^|\s)(cat|category|分类):/i.test(text)) filters.push('分类筛选');
+  return filters.length ? filters.join(' · ') : '普通关键词';
+}
+
 function getVisibleResults() {
   const bucket = state.resultFilter.bucket;
   const sort = state.resultFilter.sort || 'score-desc';
@@ -600,6 +650,11 @@ function renderResultTools(visibleResults) {
       <span>排序方式</span>
       <strong>${sortFilter.options[sortFilter.selectedIndex]?.textContent || '匹配优先'}</strong>
       <small>可以按来源和时间重新整理</small>
+    </div>
+    <div class="result-insight">
+      <span>搜索理解</span>
+      <strong>${escapeHtml(describeQuerySyntax(state.lastQuery))}</strong>
+      <small>支持 type:pdf、ext:docx、tag:课程、cat:证件</small>
     </div>
   `;
 }
@@ -704,6 +759,7 @@ async function refreshState() {
   renderMemory();
   renderSettings();
   renderIndexStatus();
+  renderHomePulse();
   renderDataHealth();
   renderFailures();
   if (state.onboarding.shouldShow) showOnboarding();
@@ -754,6 +810,32 @@ async function runSearch(mode) {
   }
 }
 
+async function openBrowserSearch() {
+  const query = ($('#queryInput').value || '').trim();
+  if (!query) {
+    setStatus('先输入一个关键词。');
+    focusSearchBox();
+    return;
+  }
+  setActiveMode('open-web');
+  const url = await window.dustySearch.searchWeb(query);
+  await refreshState();
+  setStatus(`已打开浏览器搜索：${url}`);
+}
+
+function appendQueryChip(chip) {
+  const input = $('#queryInput');
+  if (!input) return;
+  const current = input.value.trim();
+  const next = current ? `${current} ${chip}` : chip;
+  input.value = next;
+  input.focus();
+  if (chip.endsWith(':')) {
+    input.setSelectionRange(next.length, next.length);
+  }
+  setStatus('已加入搜索筛选条件。');
+}
+
 function setBusy(isBusy) {
   $('#searchAllButton').disabled = isBusy;
   $('#stopSearch').disabled = !isBusy;
@@ -770,14 +852,16 @@ document.addEventListener('click', async (event) => {
   if (modeButton) {
     const mode = modeButton.dataset.mode;
     if (mode === 'open-web') {
-      const query = ($('#queryInput').value || '').trim();
-      if (!query) return setStatus('先输入一个关键词。');
-      const url = await window.dustySearch.searchWeb(query);
-      await refreshState();
-      setStatus(`已打开浏览器搜索：${url}`);
+      await openBrowserSearch();
       return;
     }
     runSearch(mode);
+  }
+
+  const queryChip = event.target.closest('.query-chip');
+  if (queryChip) {
+    appendQueryChip(queryChip.dataset.queryChip || '');
+    return;
   }
 
   const action = event.target.closest('[data-action]')?.dataset.action;
@@ -1023,6 +1107,48 @@ $('#addFolder').addEventListener('click', async () => {
   renderFolders();
 });
 
+$('#workspaceSelect')?.addEventListener('change', (event) => {
+  const workspace = (state.settings.workspaces || []).find((item) => item.id === event.target.value);
+  $('#workspaceName').value = workspace?.name || '';
+  const hint = $('#workspaceHint');
+  if (hint) {
+    hint.textContent = workspace
+      ? `这个资料区包含 ${(workspace.folders || []).length} 个资料夹。`
+      : '当前资料夹组合可以保存成资料区。';
+  }
+});
+
+$('#saveWorkspace')?.addEventListener('click', async () => {
+  const name = ($('#workspaceName').value || '').trim();
+  if (!name) return setStatus('先给资料区起个名字。');
+  if (!(state.settings.searchFolders || []).length) return setStatus('当前还没有资料夹，先添加资料夹再保存资料区。');
+  const selectedId = $('#workspaceSelect').value;
+  state.settings = await window.dustySearch.saveWorkspace({
+    id: selectedId || '',
+    name,
+    folders: state.settings.searchFolders || []
+  });
+  await refreshState();
+  setStatus(`资料区已保存：${name}`);
+});
+
+$('#applyWorkspace')?.addEventListener('click', async () => {
+  const workspaceId = $('#workspaceSelect').value;
+  if (!workspaceId) return setStatus('先选择一个资料区。');
+  state.settings = await window.dustySearch.applyWorkspace(workspaceId);
+  state.localIndex = null;
+  await refreshState();
+  setStatus('已切换资料区，建议刷新本地索引。');
+});
+
+$('#deleteWorkspace')?.addEventListener('click', async () => {
+  const workspaceId = $('#workspaceSelect').value;
+  if (!workspaceId) return setStatus('先选择一个资料区。');
+  state.settings = await window.dustySearch.deleteWorkspace(workspaceId);
+  await refreshState();
+  setStatus('资料区已删除。');
+});
+
 $('#saveSettings').addEventListener('click', async () => {
   state.settings.maxResults = Number($('#maxResults').value || 80);
   state.settings.includeContent = $('#includeContent').checked;
@@ -1119,6 +1245,29 @@ $('#exportMemoryCsv')?.addEventListener('click', async () => {
   }
 });
 
+$('#exportSyncPackage')?.addEventListener('click', async () => {
+  try {
+    const result = await window.dustySearch.exportSyncPackage();
+    setStatus(result.exported ? `同步包已导出：${result.filePath}` : '已取消导出。');
+  } catch (error) {
+    setStatus(`同步包导出失败：${error.message || error}`);
+  }
+});
+
+$('#importSyncPackage')?.addEventListener('click', async () => {
+  try {
+    const result = await window.dustySearch.importSyncPackage();
+    if (!result.imported) {
+      setStatus('已取消导入同步包。');
+      return;
+    }
+    await refreshState();
+    setStatus(`同步包已导入：记忆库 ${result.memoryCount} 条，资料区 ${result.workspaceCount} 个。`);
+  } catch (error) {
+    setStatus(`同步包导入失败：${error.message || error}`);
+  }
+});
+
 $('#openInstallDir')?.addEventListener('click', async () => {
   try {
     const opened = await window.dustySearch.openInstallDir();
@@ -1143,6 +1292,36 @@ $('#runSelfCheckTool')?.addEventListener('click', async () => {
     setStatus(`已打开一键自检：${opened}`);
   } catch (error) {
     setStatus(`一键自检打开失败：${error.message || error}`);
+  }
+});
+
+document.addEventListener('keydown', async (event) => {
+  const key = event.key.toLowerCase();
+  if ((event.ctrlKey || event.metaKey) && key === 'k') {
+    event.preventDefault();
+    focusSearchBox();
+    setStatus('已回到搜索框。');
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && key === 'b') {
+    event.preventDefault();
+    await openBrowserSearch();
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && ['1', '2', '3', '4'].includes(event.key)) {
+    event.preventDefault();
+    const tabs = ['search', 'memory', 'import', 'settings'];
+    switchTab(tabs[Number(event.key) - 1]);
+    return;
+  }
+  if (event.key === 'Escape') {
+    if (isOnboardingOpen()) {
+      hideOnboarding();
+      return;
+    }
+    if (state.activeSearchId) {
+      $('#stopSearch')?.click();
+    }
   }
 });
 
