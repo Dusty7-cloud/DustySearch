@@ -12,6 +12,7 @@ It helps you:
 - Use simple filters such as `type:pdf`, `ext:docx`, `tag:course`, and `cat:documents`.
 - Save folder groups as workspaces and switch between them.
 - Export and import a sync package for moving memory data between computers.
+- Choose a cloud-drive folder, upload a shared sync file, and merge it on another computer.
 - Save search history.
 - Back up, restore, and export memory data.
 
@@ -45,8 +46,26 @@ The self-check writes a report to:
 ```
 
 The report now covers local name search, content search, memory search, OCR import,
-result saving, workspaces, sync packages, privacy settings, backup, export, and
-data health.
+result saving, workspaces, sync packages, cloud-drive folder sync, privacy settings,
+backup, export, and data health.
+
+## Cloud Folder Sync
+
+DustySearch can use a local folder that is already synced by OneDrive, Dropbox,
+Nutstore, a USB drive, or another cloud tool.
+
+1. Open Settings.
+2. Choose a cloud sync folder.
+3. Click "Upload to cloud sync" on the computer with the newest memory library.
+4. On another computer, choose the same synced folder and click "Merge from cloud sync".
+
+The cloud sync file is named:
+
+```text
+DustySearch-cloud-sync.json
+```
+
+Merging creates a backup first, then combines memory items and workspaces.
 
 ## Install Locally
 

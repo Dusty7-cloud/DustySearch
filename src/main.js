@@ -16,6 +16,7 @@ const LOCAL_INDEX_PATH = path.join(DATA_DIR, 'local-index.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const FAILURE_PATH = path.join(DATA_DIR, 'failures.json');
 const OCR_CACHE_DIR = path.join(DATA_DIR, 'ocr-data');
+const CLOUD_SYNC_FILE = 'DustySearch-cloud-sync.json';
 const DEFAULT_IGNORES = new Set([
   'node_modules',
   '.git',
@@ -58,7 +59,10 @@ function defaultDb() {
       allowWebSummary: true,
       cacheDocumentText: true,
       workspaces: [],
-      activeWorkspaceId: ''
+      activeWorkspaceId: '',
+      cloudSyncFolder: '',
+      cloudSyncLastUploadAt: '',
+      cloudSyncLastImportAt: ''
     },
     history: [],
     memory: []
@@ -431,6 +435,87 @@ function syncPackageContent() {
   };
 }
 
+function getCloudSyncInfo(settings = readDb().settings || {}) {
+  const folder = String(settings.cloudSyncFolder || '').trim();
+  const filePath = folder ? path.join(folder, CLOUD_SYNC_FILE) : '';
+  const exists = Boolean(folder && fs.existsSync(folder));
+  const hasFile = Boolean(filePath && fs.existsSync(filePath));
+  let cloudUpdatedAt = '';
+  let cloudSize = 0;
+  if (hasFile) {
+    try {
+      const stat = fs.statSync(filePath);
+      cloudUpdatedAt = stat.mtime.toISOString();
+      cloudSize = stat.size;
+    } catch {
+      cloudUpdatedAt = '';
+      cloudSize = 0;
+    }
+  }
+  return {
+    folder,
+    filePath,
+    configured: Boolean(folder),
+    exists,
+    hasFile,
+    cloudUpdatedAt,
+    cloudSize,
+    lastUploadAt: settings.cloudSyncLastUploadAt || '',
+    lastImportAt: settings.cloudSyncLastImportAt || ''
+  };
+}
+
+function requireCloudSyncFolder() {
+  const db = readDb();
+  const folder = String(db.settings?.cloudSyncFolder || '').trim();
+  if (!folder) throw new Error('先选择一个网盘同步文件夹。');
+  if (!fs.existsSync(folder)) throw new Error('云同步文件夹找不到了，请重新选择。');
+  return { db, folder, filePath: path.join(folder, CLOUD_SYNC_FILE) };
+}
+
+function setCloudSyncFolder(folder) {
+  const cleanFolder = String(folder || '').trim();
+  if (cleanFolder && !fs.existsSync(cleanFolder)) {
+    throw new Error('这个文件夹不存在，请重新选择。');
+  }
+  const db = readDb();
+  db.settings.cloudSyncFolder = cleanFolder;
+  writeDb(db);
+  return getCloudSyncInfo(db.settings);
+}
+
+function uploadCloudSyncPackage() {
+  const { db, filePath } = requireCloudSyncFolder();
+  const content = syncPackageContent();
+  fs.writeFileSync(filePath, JSON.stringify(content, null, 2), 'utf8');
+  db.settings.cloudSyncLastUploadAt = new Date().toISOString();
+  writeDb(db);
+  return {
+    uploaded: true,
+    filePath,
+    memoryCount: content.memory.length,
+    workspaceCount: content.settings.workspaces.length,
+    cloud: getCloudSyncInfo(db.settings)
+  };
+}
+
+function importCloudSyncPackage() {
+  const { filePath } = requireCloudSyncFolder();
+  if (!fs.existsSync(filePath)) {
+    throw new Error('云同步文件夹里还没有 DustySearch 同步文件，请先在一台电脑上上传。');
+  }
+  const summary = importSyncPackage(filePath);
+  const db = readDb();
+  db.settings.cloudSyncLastImportAt = new Date().toISOString();
+  writeDb(db);
+  return {
+    imported: true,
+    filePath,
+    ...summary,
+    cloud: getCloudSyncInfo(db.settings)
+  };
+}
+
 function importSyncPackage(filePath) {
   const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   if (payload.app !== APP_NAME || !Array.isArray(payload.memory)) {
@@ -445,6 +530,15 @@ function importSyncPackage(filePath) {
     memoryCount: db.memory.length,
     workspaceCount: db.settings.workspaces.length
   };
+}
+
+async function pickCloudSyncFolder() {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择网盘同步文件夹',
+    properties: ['openDirectory', 'createDirectory']
+  });
+  if (result.canceled || !result.filePaths[0]) return { selected: false, cloud: getCloudSyncInfo() };
+  return { selected: true, cloud: setCloudSyncFolder(result.filePaths[0]) };
 }
 
 function memoryToCsv(memory) {
@@ -1505,12 +1599,16 @@ async function runSelfCheck() {
   const originalIncludeContent = db.settings.includeContent !== false;
   const originalWorkspaces = db.settings.workspaces || [];
   const originalActiveWorkspaceId = db.settings.activeWorkspaceId || '';
+  const originalCloudSyncFolder = db.settings.cloudSyncFolder || '';
+  const originalCloudSyncLastUploadAt = db.settings.cloudSyncLastUploadAt || '';
+  const originalCloudSyncLastImportAt = db.settings.cloudSyncLastImportAt || '';
   let localName = [];
   let contentOnly = [];
   let memoryOnly = [];
   let syntaxFilterWorks = false;
   let workspaceWorks = false;
   let syncPackageWorks = false;
+  let cloudSyncWorks = false;
   let memoryMetaWorks = false;
   let memoryDedupeWorks = false;
   let backupWorks = false;
@@ -1587,6 +1685,16 @@ async function runSelfCheck() {
     syncPackageWorks = syncSummary.memoryCount >= 1
       && readDb().memory.some((item) => item.source === 'https://example.com/dustysearch-sync-check');
     markSelfCheck('sync-package');
+    const cloudDir = path.join(selfCheckDir, 'cloud-sync');
+    fs.mkdirSync(cloudDir, { recursive: true });
+    setCloudSyncFolder(cloudDir);
+    const uploadResult = uploadCloudSyncPackage();
+    const importResult = importCloudSyncPackage();
+    cloudSyncWorks = uploadResult.uploaded
+      && fs.existsSync(path.join(cloudDir, CLOUD_SYNC_FILE))
+      && importResult.imported
+      && getCloudSyncInfo(readDb().settings).hasFile;
+    markSelfCheck('cloud-sync');
     const backupPath = createBackup('self-check');
     backupWorks = fs.existsSync(path.join(backupPath, 'memory.json'))
       && fs.existsSync(path.join(backupPath, 'backup-info.json'));
@@ -1663,6 +1771,9 @@ async function runSelfCheck() {
     restored.settings.cacheDocumentText = db.settings.cacheDocumentText !== false;
     restored.settings.workspaces = originalWorkspaces;
     restored.settings.activeWorkspaceId = originalActiveWorkspaceId;
+    restored.settings.cloudSyncFolder = originalCloudSyncFolder;
+    restored.settings.cloudSyncLastUploadAt = originalCloudSyncLastUploadAt;
+    restored.settings.cloudSyncLastImportAt = originalCloudSyncLastImportAt;
     restored.history = (restored.history || []).filter((item) => !looksMojibake(item.query));
     restored.memory = (restored.memory || []).filter((item) => item.source !== workbookPath);
     restored.memory = (restored.memory || []).filter((item) => item.source !== 'https://example.com/dustysearch-saved-result-check');
@@ -1686,6 +1797,7 @@ async function runSelfCheck() {
     syntaxFilterWorks,
     workspaceWorks,
     syncPackageWorks,
+    cloudSyncWorks,
     memoryDedupeWorks,
     memoryMetaWorks,
     backupWorks,
@@ -1739,6 +1851,7 @@ ipcMain.handle('app:getState', () => {
       builtAt: localIndex.builtAt,
       itemCount: localIndex.itemCount || 0
     } : null,
+    cloudSync: getCloudSyncInfo(db.settings),
     settings: db.settings,
     history: db.history,
     memory: db.memory,
@@ -1957,7 +2070,10 @@ ipcMain.handle('settings:save', (_event, settings) => {
     allowWebSummary: settings.allowWebSummary !== false,
     cacheDocumentText: settings.cacheDocumentText !== false,
     workspaces: Array.isArray(settings.workspaces) ? settings.workspaces.map(sanitizeWorkspace).slice(0, 30) : (db.settings.workspaces || []),
-    activeWorkspaceId: String(settings.activeWorkspaceId || db.settings.activeWorkspaceId || '')
+    activeWorkspaceId: String(settings.activeWorkspaceId || db.settings.activeWorkspaceId || ''),
+    cloudSyncFolder: String(settings.cloudSyncFolder || db.settings.cloudSyncFolder || '').trim(),
+    cloudSyncLastUploadAt: db.settings.cloudSyncLastUploadAt || '',
+    cloudSyncLastImportAt: db.settings.cloudSyncLastImportAt || ''
   };
   writeDb(db);
   return db.settings;
@@ -1973,6 +2089,22 @@ ipcMain.handle('workspace:apply', (_event, workspaceId) => {
 
 ipcMain.handle('workspace:delete', (_event, workspaceId) => {
   return deleteWorkspace(String(workspaceId || ''));
+});
+
+ipcMain.handle('cloud:pickFolder', async () => {
+  return pickCloudSyncFolder();
+});
+
+ipcMain.handle('cloud:clearFolder', () => {
+  return { cloud: setCloudSyncFolder('') };
+});
+
+ipcMain.handle('cloud:upload', () => {
+  return uploadCloudSyncPackage();
+});
+
+ipcMain.handle('cloud:import', () => {
+  return importCloudSyncPackage();
 });
 
 ipcMain.handle('onboarding:complete', () => {

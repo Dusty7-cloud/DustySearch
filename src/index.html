@@ -331,15 +331,24 @@
             <p class="data-tool-note">恢复会先自动备份当前数据，再覆盖为你选择的备份。</p>
           </section>
 
-          <section class="panel data-tools">
+          <section class="panel data-tools cloud-sync-panel">
             <div class="panel-head">
-              <h2>跨电脑同步包</h2>
+              <div>
+                <h2>云同步</h2>
+                <span>选择一个 OneDrive、网盘或 U 盘同步文件夹，上传和合并记忆库。</span>
+              </div>
             </div>
-            <div class="data-tool-grid">
-              <button id="exportSyncPackage" class="small-button">导出同步包</button>
+            <div id="cloudSyncStatus" class="cloud-sync-status"></div>
+            <div class="data-tool-grid cloud-actions">
+              <button id="pickCloudSyncFolder" class="small-button">选择同步文件夹</button>
+              <button id="openCloudSyncFolder" class="small-button">打开同步文件夹</button>
+              <button id="uploadCloudSync" class="small-button">上传到云同步</button>
+              <button id="importCloudSync" class="small-button">从云同步合并</button>
+              <button id="exportSyncPackage" class="small-button">另存同步包</button>
               <button id="importSyncPackage" class="small-button">导入同步包</button>
+              <button id="clearCloudSyncFolder" class="small-button danger-button">取消云同步文件夹</button>
             </div>
-            <p class="data-tool-note">同步包可以放到网盘或 U 盘，在另一台电脑导入后合并记忆库和资料区。</p>
+            <p class="data-tool-note">云同步不会登录账号；它使用你已经同步到云端的本地文件夹。合并前会自动备份当前数据。</p>
           </section>
 
           <section class="panel data-tools">

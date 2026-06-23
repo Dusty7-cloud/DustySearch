@@ -5,6 +5,7 @@
   memory: [],
   memorySummary: { total: 0, categories: {}, tags: {}, typeCounts: {}, recentCount: 0 },
   localIndex: null,
+  cloudSync: null,
   dataHealth: null,
   onboarding: { completed: false, shouldShow: false },
   failures: [],
@@ -359,9 +360,29 @@ function renderSettings() {
   $('#saveHistory').checked = state.settings.saveHistory !== false;
   $('#allowWebSummary').checked = state.settings.allowWebSummary !== false;
   $('#cacheDocumentText').checked = state.settings.cacheDocumentText !== false;
+  renderCloudSync();
   renderWorkspaces();
   renderAppInfo();
   renderFolders();
+}
+
+function renderCloudSync() {
+  const node = $('#cloudSyncStatus');
+  if (!node) return;
+  const cloud = state.cloudSync || {};
+  const rows = [
+    ['同步文件夹', cloud.folder || '还没有选择'],
+    ['云端同步文件', cloud.hasFile ? '已找到' : '还没有上传'],
+    ['云端更新时间', formatDate(cloud.cloudUpdatedAt) || '暂无'],
+    ['上次上传', formatDate(cloud.lastUploadAt) || '暂无'],
+    ['上次合并', formatDate(cloud.lastImportAt) || '暂无']
+  ];
+  node.innerHTML = rows.map(([label, value]) => `
+    <div class="cloud-row">
+      <span>${escapeHtml(label)}</span>
+      <strong title="${escapeAttr(value)}">${escapeHtml(value)}</strong>
+    </div>
+  `).join('');
 }
 
 function renderWorkspaces() {
@@ -751,6 +772,7 @@ async function refreshState() {
   state.memory = fresh.memory || [];
   state.memorySummary = fresh.memorySummary || { total: 0, categories: {}, tags: {}, typeCounts: {}, recentCount: 0 };
   state.localIndex = fresh.localIndex || null;
+  state.cloudSync = fresh.cloudSync || null;
   state.dataHealth = fresh.dataHealth || null;
   state.onboarding = fresh.onboarding || { completed: false, shouldShow: false };
   state.failures = fresh.failures || [];
@@ -1265,6 +1287,57 @@ $('#importSyncPackage')?.addEventListener('click', async () => {
     setStatus(`同步包已导入：记忆库 ${result.memoryCount} 条，资料区 ${result.workspaceCount} 个。`);
   } catch (error) {
     setStatus(`同步包导入失败：${error.message || error}`);
+  }
+});
+
+$('#pickCloudSyncFolder')?.addEventListener('click', async () => {
+  try {
+    const result = await window.dustySearch.pickCloudSyncFolder();
+    await refreshState();
+    setStatus(result.selected ? '云同步文件夹已设置。' : '没有选择云同步文件夹。');
+  } catch (error) {
+    setStatus(`选择云同步文件夹失败：${error.message || error}`);
+  }
+});
+
+$('#openCloudSyncFolder')?.addEventListener('click', async () => {
+  const folder = state.cloudSync?.folder;
+  if (!folder) return setStatus('先选择一个云同步文件夹。');
+  try {
+    await window.dustySearch.openItem(folder);
+    setStatus(`已打开云同步文件夹：${folder}`);
+  } catch (error) {
+    setStatus(`打开云同步文件夹失败：${error.message || error}`);
+  }
+});
+
+$('#uploadCloudSync')?.addEventListener('click', async () => {
+  try {
+    const result = await window.dustySearch.uploadCloudSync();
+    await refreshState();
+    setStatus(`已上传云同步：记忆库 ${result.memoryCount} 条，资料区 ${result.workspaceCount} 个。`);
+  } catch (error) {
+    setStatus(`云同步上传失败：${error.message || error}`);
+  }
+});
+
+$('#importCloudSync')?.addEventListener('click', async () => {
+  try {
+    const result = await window.dustySearch.importCloudSync();
+    await refreshState();
+    setStatus(`云同步已合并：记忆库 ${result.memoryCount} 条，资料区 ${result.workspaceCount} 个。`);
+  } catch (error) {
+    setStatus(`云同步合并失败：${error.message || error}`);
+  }
+});
+
+$('#clearCloudSyncFolder')?.addEventListener('click', async () => {
+  try {
+    await window.dustySearch.clearCloudSyncFolder();
+    await refreshState();
+    setStatus('已取消云同步文件夹。');
+  } catch (error) {
+    setStatus(`取消云同步文件夹失败：${error.message || error}`);
   }
 });
 
