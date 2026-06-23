@@ -18,6 +18,9 @@ contextBridge.exposeInMainWorld('dustySearch', {
   pickOcrImages: () => ipcRenderer.invoke('file:pickOcrImport'),
   importSite: (url) => ipcRenderer.invoke('site:import', url),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
+  saveWorkspace: (payload) => ipcRenderer.invoke('workspace:save', payload),
+  applyWorkspace: (workspaceId) => ipcRenderer.invoke('workspace:apply', workspaceId),
+  deleteWorkspace: (workspaceId) => ipcRenderer.invoke('workspace:delete', workspaceId),
   completeOnboarding: () => ipcRenderer.invoke('onboarding:complete'),
   resetOnboarding: () => ipcRenderer.invoke('onboarding:reset'),
   deleteMemory: (id) => ipcRenderer.invoke('memory:delete', id),
@@ -32,5 +35,7 @@ contextBridge.exposeInMainWorld('dustySearch', {
   runSelfCheckTool: () => ipcRenderer.invoke('app:runSelfCheckTool'),
   createBackup: () => ipcRenderer.invoke('backup:create'),
   restoreBackup: () => ipcRenderer.invoke('backup:restore'),
-  exportMemory: (format) => ipcRenderer.invoke('backup:exportMemory', format)
+  exportMemory: (format) => ipcRenderer.invoke('backup:exportMemory', format),
+  exportSyncPackage: () => ipcRenderer.invoke('sync:exportPackage'),
+  importSyncPackage: () => ipcRenderer.invoke('sync:importPackage')
 });
