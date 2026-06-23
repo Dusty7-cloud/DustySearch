@@ -1,9 +1,11 @@
 const { app, BrowserWindow, ipcMain, shell, dialog, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { spawnSync } = require('child_process');
 const mammoth = require('mammoth');
 const { PDFParse } = require('pdf-parse');
 const XLSX = require('xlsx');
+const { createWorker } = require('tesseract.js');
 
 const APP_NAME = 'DustySearch';
 const DATA_DIR = path.join(app.getPath('documents'), 'DustySearchData');
@@ -13,6 +15,7 @@ const INDEX_CACHE_PATH = path.join(DATA_DIR, 'document-index.json');
 const LOCAL_INDEX_PATH = path.join(DATA_DIR, 'local-index.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const FAILURE_PATH = path.join(DATA_DIR, 'failures.json');
+const OCR_CACHE_DIR = path.join(DATA_DIR, 'ocr-data');
 const DEFAULT_IGNORES = new Set([
   'node_modules',
   '.git',
@@ -29,6 +32,7 @@ const TEXT_EXTENSIONS = new Set([
   '.ps1', '.bat', '.cmd', '.ini', '.yml', '.yaml'
 ]);
 const DOCUMENT_EXTENSIONS = new Set(['.pdf', '.docx', '.xlsx', '.xls']);
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.bmp', '.webp', '.tif', '.tiff']);
 
 let mainWindow;
 const IS_SELF_CHECK = process.argv.includes('--self-check');
@@ -112,6 +116,11 @@ function logLine(message, detail = '') {
   } catch {
     // 日志不能影响软件启动。
   }
+}
+
+function isBenignPipeError(error) {
+  const text = `${error?.code || ''} ${error?.message || ''} ${error?.stack || ''}`;
+  return text.includes('EPIPE') || text.includes('ERR_STREAM_DESTROYED');
 }
 
 function ensureDataFile() {
@@ -746,7 +755,13 @@ function getMemorySummary(memory) {
   const recentCutoff = Date.now() - 1000 * 60 * 60 * 24 * 7;
   for (const item of memory || []) {
     const category = item.category || guessCategory(item);
-    const typeKey = item.type === 'website' ? 'website' : item.type === 'saved-result' ? 'saved' : 'file';
+    const typeKey = item.type === 'website'
+      ? 'website'
+      : item.type === 'saved-result'
+        ? 'saved'
+        : item.type === 'ocr-image'
+          ? 'ocr'
+          : 'file';
     categories[category] = (categories[category] || 0) + 1;
     typeCounts[typeKey] = (typeCounts[typeKey] || 0) + 1;
     if (new Date(item.updatedAt || item.createdAt || 0).getTime() >= recentCutoff) recentCount += 1;
@@ -1057,6 +1072,84 @@ async function importFile(filePath) {
   return item;
 }
 
+async function recognizeImageText(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (!IMAGE_EXTENSIONS.has(ext)) {
+    throw new Error('OCR 第一版支持 png、jpg、jpeg、bmp、webp、tif 图片。');
+  }
+  const runOcr = async (language) => {
+    fs.mkdirSync(OCR_CACHE_DIR, { recursive: true });
+    const worker = await createWorker(language, 1, {
+      cachePath: OCR_CACHE_DIR,
+      logger: () => {}
+    });
+    try {
+      const result = await worker.recognize(filePath);
+      return String(result?.data?.text || '').replace(/\s+/g, ' ').trim();
+    } finally {
+      await worker.terminate();
+    }
+  };
+
+  try {
+    return await runOcr('chi_sim+eng');
+  } catch (error) {
+    logLine('ocr multilingual failed, retrying english', error.message || String(error));
+    try {
+      return await runOcr('eng');
+    } catch (fallbackError) {
+      recordFailure('ocr', filePath, fallbackError);
+      throw new Error('图片文字识别失败。请换一张更清晰的图片，或确认图片格式是 png、jpg、bmp、webp、tif。');
+    }
+  }
+}
+
+async function importImageWithOcr(filePath) {
+  const text = await recognizeImageText(filePath);
+  const db = readDb();
+  const existingIndex = db.memory.findIndex((item) => item.source === filePath && item.type === 'ocr-image');
+  const item = {
+    ...(existingIndex >= 0 ? db.memory[existingIndex] : {}),
+    id: cryptoId(),
+    type: 'ocr-image',
+    title: `${path.basename(filePath)}（OCR）`,
+    source: filePath,
+    category: '图片文字',
+    tags: existingIndex >= 0 ? (db.memory[existingIndex].tags || []) : ['OCR'],
+    content: text || 'OCR 没有识别到清晰文字。',
+    createdAt: existingIndex >= 0 ? db.memory[existingIndex].createdAt : new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  if (existingIndex >= 0) {
+    db.memory.splice(existingIndex, 1);
+  }
+  db.memory.unshift(item);
+  writeDb(db);
+  return item;
+}
+
+function writeSelfCheckOcrImage(filePath) {
+  const script = [
+    'Add-Type -AssemblyName System.Drawing',
+    '$format = [System.Drawing.Imaging.PixelFormat]::Format24bppRgb',
+    '$bmp = New-Object System.Drawing.Bitmap 900,260,$format',
+    '$g = [System.Drawing.Graphics]::FromImage($bmp)',
+    '$g.Clear([System.Drawing.Color]::White)',
+    '$font = New-Object System.Drawing.Font("Arial",72,[System.Drawing.FontStyle]::Bold)',
+    '$g.DrawString("DUSTY OCR 2026",$font,[System.Drawing.Brushes]::Black,35,78)',
+    `$bmp.Save('${filePath.replace(/'/g, "''")}',[System.Drawing.Imaging.ImageFormat]::Png)`,
+    '$g.Dispose()',
+    '$bmp.Dispose()'
+  ].join('; ');
+  const result = spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+    windowsHide: true,
+    encoding: 'utf8'
+  });
+  if (result.status !== 0 || !fs.existsSync(filePath)) {
+    throw new Error(`OCR 自检图片生成失败：${result.stderr || result.stdout || result.error?.message || '未知错误'}`);
+  }
+}
+
 async function saveResultToMemory(result) {
   const source = String(result?.path || result?.source || '').trim();
   if (!source) throw new Error('没有可收藏的来源。');
@@ -1111,7 +1204,12 @@ app.whenReady().then(() => {
 });
 
 async function runSelfCheck() {
+  const markSelfCheck = (step) => {
+    logLine('self-check', step);
+  };
+  markSelfCheck('start');
   const web = await searchWebResults('DustySearch test');
+  markSelfCheck('web');
   const db = readDb();
   const selfCheckDir = path.join(DATA_DIR, 'self-check');
   fs.mkdirSync(selfCheckDir, { recursive: true });
@@ -1121,7 +1219,9 @@ async function runSelfCheck() {
   XLSX.utils.book_append_sheet(workbook, sheet, 'Sheet1');
   XLSX.writeFile(workbook, workbookPath);
   const workbookText = await getCachedDocumentText(workbookPath);
+  markSelfCheck('workbook');
   const originalFolders = db.settings.searchFolders;
+  const originalIncludeContent = db.settings.includeContent !== false;
   let localName = [];
   let contentOnly = [];
   let memoryOnly = [];
@@ -1137,15 +1237,21 @@ async function runSelfCheck() {
   let professionalResultsWork = false;
   let onboardingWorks = false;
   let privacySettingsWork = false;
+  let ocrWorks = false;
   try {
     db.settings.searchFolders = Array.from(new Set([...originalFolders, selfCheckDir]));
+    db.settings.includeContent = true;
     writeDb(db);
+    await rebuildLocalIndex();
     localName = await searchFiles('self-check.xlsx', 'name');
+    markSelfCheck('local-name');
     contentOnly = await searchFiles('DustySearchUniqueExcelText', 'content');
+    markSelfCheck('content');
     memoryOnly = searchMemory('DustySearchUniqueExcelText');
     const beforeMemoryCount = readDb().memory.length;
     await importFile(workbookPath);
     await importFile(workbookPath);
+    markSelfCheck('import');
     const withImport = readDb();
     const imported = withImport.memory.filter((item) => item.source === workbookPath);
     memoryDedupeWorks = imported.length === 1 && withImport.memory.length === beforeMemoryCount + 1;
@@ -1155,6 +1261,7 @@ async function runSelfCheck() {
       content: 'DustySearchSavedResultMarker'
     });
     saveResultWorks = readDb().memory.some((item) => item.source === 'https://example.com/dustysearch-saved-result-check');
+    markSelfCheck('save-result');
     const importedItem = imported[0];
     importedItem.category = '自检';
     importedItem.tags = ['测试', '索引'];
@@ -1164,11 +1271,13 @@ async function runSelfCheck() {
     const backupPath = createBackup('self-check');
     backupWorks = fs.existsSync(path.join(backupPath, 'memory.json'))
       && fs.existsSync(path.join(backupPath, 'backup-info.json'));
+    markSelfCheck('backup');
     csvExportWorks = memoryToCsv(readDb().memory).startsWith('title,source,type,category,tags,createdAt,updatedAt');
     const brokenDocxPath = path.join(selfCheckDir, 'broken-self-check.docx');
     fs.writeFileSync(brokenDocxPath, 'not a real docx', 'utf8');
     await extractDocumentText(brokenDocxPath);
     failureListWorks = readFailures().some((item) => item.path === brokenDocxPath);
+    markSelfCheck('failure-list');
     const cancelCheckId = `self-check-cancel-${Date.now()}`;
     cancelSearch(cancelCheckId);
     try {
@@ -1215,9 +1324,19 @@ async function runSelfCheck() {
     privacySettingsWork = privacyAfter.history.length === historyCount
       && webWhenDisabled[0]?.title === '网页摘要已关闭'
       && getDataHealth().settings.allowWebSummary === false;
+    markSelfCheck('privacy');
+    const ocrPngPath = path.join(selfCheckDir, 'ocr-self-check.png');
+    writeSelfCheckOcrImage(ocrPngPath);
+    markSelfCheck('ocr-image');
+    const ocrItem = await importImageWithOcr(ocrPngPath);
+    ocrWorks = ocrItem.type === 'ocr-image'
+      && ocrItem.category === '图片文字'
+      && /DUSTY|OCR|2026/i.test(ocrItem.content || '');
+    markSelfCheck('ocr');
   } finally {
     const restored = readDb();
     restored.settings.searchFolders = originalFolders;
+    restored.settings.includeContent = originalIncludeContent;
     restored.settings.onboardingCompleted = db.settings.onboardingCompleted;
     restored.settings.onboardingCompletedAt = db.settings.onboardingCompletedAt || '';
     restored.settings.saveHistory = db.settings.saveHistory !== false;
@@ -1226,10 +1345,12 @@ async function runSelfCheck() {
     restored.history = (restored.history || []).filter((item) => !looksMojibake(item.query));
     restored.memory = (restored.memory || []).filter((item) => item.source !== workbookPath);
     restored.memory = (restored.memory || []).filter((item) => item.source !== 'https://example.com/dustysearch-saved-result-check');
+    restored.memory = (restored.memory || []).filter((item) => !String(item.source || '').includes('ocr-self-check'));
     writeDb(restored);
-    writeFailures(readFailures().filter((item) => !String(item.path || '').includes('broken-self-check.docx')));
+    writeFailures(readFailures().filter((item) => !String(item.path || '').includes('broken-self-check.docx') && !String(item.path || '').includes('ocr-self-check')));
   }
   await rebuildLocalIndex();
+  markSelfCheck('local-index');
   const restoredDb = readDb();
   const localIndex = readLocalIndex();
   return {
@@ -1252,6 +1373,7 @@ async function runSelfCheck() {
     professionalResultsWork,
     onboardingWorks,
     privacySettingsWork,
+    ocrWorks,
     localIndexWorks: Boolean(localIndex && localIndex.itemCount > 0),
     searchFolders: restoredDb.settings.searchFolders.length,
     appInfoWorks: getAppInfo().name === APP_NAME && fs.existsSync(getAppInfo().appPath),
@@ -1268,10 +1390,12 @@ app.on('window-all-closed', () => {
 });
 
 process.on('uncaughtException', (error) => {
+  if (isBenignPipeError(error)) return;
   logLine('uncaught exception', error.stack || error.message || String(error));
 });
 
 process.on('unhandledRejection', (error) => {
+  if (isBenignPipeError(error)) return;
   logLine('unhandled rejection', error?.stack || error?.message || String(error));
 });
 
@@ -1447,6 +1571,22 @@ ipcMain.handle('file:pickImport', async () => {
   const imported = [];
   for (const filePath of result.filePaths) {
     imported.push(await importFile(filePath));
+  }
+  return imported;
+});
+
+ipcMain.handle('file:pickOcrImport', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'bmp', 'webp', 'tif', 'tiff'] },
+      { name: '全部文件', extensions: ['*'] }
+    ]
+  });
+  if (result.canceled) return [];
+  const imported = [];
+  for (const filePath of result.filePaths) {
+    imported.push(await importImageWithOcr(filePath));
   }
   return imported;
 });
