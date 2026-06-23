@@ -8,6 +8,10 @@ It helps you:
 - Search text content from common files.
 - Keep imported files and websites in a memory library.
 - Open browser search result pages.
+- Save useful results into the memory library.
+- Use simple filters such as `type:pdf`, `ext:docx`, `tag:course`, and `cat:documents`.
+- Save folder groups as workspaces and switch between them.
+- Export and import a sync package for moving memory data between computers.
 - Save search history.
 - Back up, restore, and export memory data.
 
@@ -39,6 +43,10 @@ The self-check writes a report to:
 ```text
 %USERPROFILE%\Documents\DustySearchData\self-check-result.json
 ```
+
+The report now covers local name search, content search, memory search, OCR import,
+result saving, workspaces, sync packages, privacy settings, backup, export, and
+data health.
 
 ## Install Locally
 
