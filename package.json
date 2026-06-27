@@ -1,10 +1,23 @@
 {
   "name": "dusty-search",
   "version": "1.0.0",
-  "description": "A local desktop search and memory app.",
+  "description": "Windows desktop search and memory library for local files, document text, screenshots, and saved web pages.",
   "main": "src/main.js",
   "author": "Dusty7",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Dusty7-cloud/DustySearch.git"
+  },
+  "keywords": [
+    "windows",
+    "desktop-search",
+    "local-search",
+    "document-search",
+    "ocr",
+    "electron",
+    "memory-library"
+  ],
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --win portable",
