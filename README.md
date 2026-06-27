@@ -110,6 +110,26 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-DustySearch.ps1
 
 并在桌面创建 `DustySearch` 快捷方式。
 
+## 反馈和路线图
+
+如果你试用了 DustySearch，最希望收到这几类反馈：
+
+- 下载、解压、启动是否顺利。
+- 搜文件名、搜正文、搜截图文字是否符合预期。
+- 记忆库、标签、备注是否真的有用。
+- 哪些文件格式最希望优先支持。
+- 哪个地方让你困惑、卡住或不放心。
+
+可以在这里提交反馈：
+
+```text
+https://github.com/Dusty7-cloud/DustySearch/issues
+```
+
+下一步计划见：[路线图](docs/roadmap.md)。
+
+如果你想帮忙分享 DustySearch，可以直接复制这里的文案：[推广素材包](docs/promotion-kit.md)。
+
 ## 开发运行
 
 ```powershell
