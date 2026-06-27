@@ -120,11 +120,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-DustySearch.ps1
 - 哪些文件格式最希望优先支持。
 - 哪个地方让你困惑、卡住或不放心。
 
-可以在这里提交反馈：
-
-```text
-https://github.com/Dusty7-cloud/DustySearch/issues
-```
+可以在这里提交反馈：[打开反馈区](https://github.com/Dusty7-cloud/DustySearch/issues)。
 
 下一步计划见：[路线图](docs/roadmap.md)。
 
