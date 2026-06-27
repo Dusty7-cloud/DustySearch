@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('dustySearch', {
   pickImportFiles: () => ipcRenderer.invoke('file:pickImport'),
   pickOcrImages: () => ipcRenderer.invoke('file:pickOcrImport'),
   importSite: (url) => ipcRenderer.invoke('site:import', url),
+  retryFailure: (failureId) => ipcRenderer.invoke('failure:retry', failureId),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   saveWorkspace: (payload) => ipcRenderer.invoke('workspace:save', payload),
   applyWorkspace: (workspaceId) => ipcRenderer.invoke('workspace:apply', workspaceId),
@@ -41,5 +42,14 @@ contextBridge.exposeInMainWorld('dustySearch', {
   restoreBackup: () => ipcRenderer.invoke('backup:restore'),
   exportMemory: (format) => ipcRenderer.invoke('backup:exportMemory', format),
   exportSyncPackage: () => ipcRenderer.invoke('sync:exportPackage'),
-  importSyncPackage: () => ipcRenderer.invoke('sync:importPackage')
+  importSyncPackage: () => ipcRenderer.invoke('sync:importPackage'),
+  onImportProgress: (callback) => {
+    const handler = (_event, progress) => callback(progress);
+    ipcRenderer.on('import:progress', handler);
+    ipcRenderer.send('import:subscribe');
+    return () => {
+      ipcRenderer.removeListener('import:progress', handler);
+      ipcRenderer.send('import:unsubscribe');
+    };
+  }
 });

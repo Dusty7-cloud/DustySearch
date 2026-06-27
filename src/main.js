@@ -38,6 +38,8 @@ const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.bmp', '.webp', '.ti
 let mainWindow;
 const IS_SELF_CHECK = process.argv.includes('--self-check');
 const cancelledSearches = new Set();
+const importProgressSubscribers = new Set();
+const WEB_SUMMARY_TIMEOUT_MS = 3500;
 
 const gotLock = IS_SELF_CHECK || app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -121,6 +123,28 @@ function emptySearchResult() {
   return { local: [], memory: [], web: [], webUrl: '' };
 }
 
+function webFallbackResult(query, title = `打开浏览器搜索：${query}`, content = '') {
+  return [{
+    id: cryptoId(),
+    type: 'web-fallback',
+    title,
+    source: getWebUrl(query),
+    content: content || '本机和记忆库结果已先返回；网页摘要暂时没有成功读取，点击这里仍可打开浏览器搜索。',
+    createdAt: new Date().toISOString(),
+    score: 0
+  }];
+}
+
+function withTimeout(promise, ms, fallbackValue) {
+  let timer = null;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(fallbackValue), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 function logLine(message, detail = '') {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -155,7 +179,7 @@ function readDb() {
       memory: Array.isArray(db.memory) ? db.memory : []
     };
     merged.memory = normalizeMemoryItems(merged.memory);
-    const cleanedHistory = merged.history.filter((item) => !looksMojibake(item.query));
+    const cleanedHistory = merged.history.filter((item) => isUsefulHistoryQuery(item.query));
     if (cleanedHistory.length !== merged.history.length) {
       merged.history = cleanedHistory;
       writeDb(merged);
@@ -178,7 +202,8 @@ function normalizeMemoryItems(items) {
   return (items || []).map((item) => ({
     ...item,
     category: item.category || guessCategory(item),
-    tags: Array.isArray(item.tags) ? item.tags : []
+    tags: Array.isArray(item.tags) ? item.tags : [],
+    note: String(item.note || '')
   }));
 }
 
@@ -198,6 +223,12 @@ function looksMojibake(value) {
     const code = char.charCodeAt(0);
     return code >= 0x9500 && code <= 0x9fff;
   });
+}
+
+function isUsefulHistoryQuery(value) {
+  const text = String(value || '').trim();
+  if (!text || looksMojibake(text)) return false;
+  return /[\p{L}\p{N}]/u.test(text);
 }
 
 function writeDb(db) {
@@ -241,6 +272,28 @@ function recordFailure(stage, filePath, error) {
     failures.unshift(entry);
   }
   writeFailures(failures);
+}
+
+function clearFailure(stage, filePath) {
+  const failures = readFailures();
+  const next = failures.filter((item) => !(item.stage === stage && item.path === filePath));
+  if (next.length !== failures.length) {
+    writeFailures(next);
+  }
+}
+
+function emitImportProgress(progress) {
+  for (const sender of Array.from(importProgressSubscribers)) {
+    try {
+      if (sender.isDestroyed?.()) {
+        importProgressSubscribers.delete(sender);
+        continue;
+      }
+      sender.send('import:progress', progress);
+    } catch {
+      importProgressSubscribers.delete(sender);
+    }
+  }
 }
 
 function simplifyErrorMessage(message) {
@@ -542,7 +595,7 @@ async function pickCloudSyncFolder() {
 }
 
 function memoryToCsv(memory) {
-  const headers = ['title', 'source', 'type', 'category', 'tags', 'createdAt', 'updatedAt'];
+  const headers = ['title', 'source', 'type', 'category', 'tags', 'note', 'createdAt', 'updatedAt'];
   const escapeCell = (value) => `"${String(value || '').replace(/"/g, '""')}"`;
   const rows = (memory || []).map((item) => [
     item.title,
@@ -550,6 +603,7 @@ function memoryToCsv(memory) {
     item.type,
     item.category,
     (item.tags || []).join('|'),
+    item.note,
     item.createdAt,
     item.updatedAt
   ].map(escapeCell).join(','));
@@ -772,6 +826,7 @@ function matchesMemoryFilters(item, parsed) {
 }
 
 function saveHistory(query, scope, resultCount) {
+  if (!isUsefulHistoryQuery(query)) return;
   const db = readDb();
   if (db.settings?.saveHistory === false) return;
   db.history.unshift({
@@ -1108,12 +1163,12 @@ function searchMemory(query, searchId = '') {
       assertSearchActive(searchId);
       if (!matchesMemoryFilters(item, parsed)) return null;
       const textScore = parsed.hasText
-        ? scoreText(`${item.title} ${item.source} ${item.category || ''} ${(item.tags || []).join(' ')} ${item.content}`, queryText)
+        ? scoreText(`${item.title} ${item.source} ${item.category || ''} ${(item.tags || []).join(' ')} ${item.note || ''} ${item.content}`, queryText)
         : 0;
       const filterScore = parsed.hasFilters ? 1 : 0;
       return {
         ...item,
-        matchReason: textScore > 0 ? '记忆库标题、来源、标签或内容包含关键词' : '符合记忆库筛选条件',
+        matchReason: textScore > 0 ? '记忆库标题、来源、标签、备注或内容包含关键词' : '符合记忆库筛选条件',
         score: textScore + filterScore
       };
     })
@@ -1221,7 +1276,7 @@ function getDataHealth() {
     addRecommendation('info', '检索历史已关闭', '新的检索不会写入历史列表。', 'go-settings', '查看隐私设置');
   }
   if (failures.length) {
-    addRecommendation('warning', `${failures.length} 条读取失败`, '通常是加密、损坏、权限不够或格式不标准的文件，可以在下面查看。', 'clear-failures', '清空旧记录');
+    addRecommendation('warning', `${failures.length} 条读取失败`, '通常是加密、损坏、权限不够或格式不标准的文件，先打开列表看清楚再处理。', 'go-failures', '查看列表');
   }
   if (!memorySummary.total) {
     addRecommendation('info', '记忆库还是空的', '把常用文件、网站或重要结果收藏进来，后面可以单独检索。', 'go-import', '导入资料');
@@ -1312,7 +1367,66 @@ function stripTags(value) {
   return decodeHtml(String(value || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
 }
 
-function parseBingResults(html) {
+function getSearchTerms(query) {
+  const parsed = parseSearchQuery(query);
+  return normalizeText(parsed.text || parsed.raw)
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2 && term.length < 60)
+    .slice(0, 8);
+}
+
+function scoreWebRelevance(result, terms) {
+  if (!terms.length) return 1;
+  const title = normalizeText(result.title);
+  const source = normalizeText(result.source);
+  const content = normalizeText(result.content);
+  let score = 0;
+  let matchedTerms = 0;
+
+  for (const term of terms) {
+    let matched = false;
+    if (title.includes(term)) {
+      score += term.length >= 4 ? 6 : 4;
+      matched = true;
+    }
+    if (content.includes(term)) {
+      score += term.length >= 4 ? 3 : 2;
+      matched = true;
+    }
+    if (source.includes(term)) {
+      score += 1;
+      matched = true;
+    }
+    if (matched) matchedTerms += 1;
+  }
+
+  const compactQuery = terms.join('');
+  const compactTitle = title.replace(/\s+/g, '');
+  const compactContent = content.replace(/\s+/g, '');
+  if (compactQuery.length >= 4 && (compactTitle.includes(compactQuery) || compactContent.includes(compactQuery))) {
+    score += 8;
+  }
+
+  if (matchedTerms >= Math.min(2, terms.length)) score += 4;
+  return score;
+}
+
+function filterRelevantWebResults(results, query) {
+  const terms = getSearchTerms(query);
+  if (!terms.length) return results.slice(0, 4);
+
+  return results
+    .map((item) => ({
+      ...item,
+      score: scoreWebRelevance(item, terms)
+    }))
+    .filter((item) => item.score >= (terms.length === 1 ? 3 : 5))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 4);
+}
+
+function parseBingResults(html, query = '') {
   const results = [];
   const blocks = html.match(/<li class="b_algo"[\s\S]*?<\/li>/gi) || [];
   for (const block of blocks) {
@@ -1333,26 +1447,19 @@ function parseBingResults(html) {
     });
     if (results.length >= 8) break;
   }
-  return results;
+  return filterRelevantWebResults(results, query);
 }
 
 async function searchWebResults(query, searchId = '') {
   assertSearchActive(searchId);
   const db = readDb();
   if (db.settings?.allowWebSummary === false) {
-    return [{
-      id: cryptoId(),
-      type: 'web-fallback',
-      title: '网页摘要已关闭',
-      source: getWebUrl(query),
-      content: '隐私设置里关闭了网页摘要。你仍然可以使用“浏览器搜索”打开结果页。',
-      createdAt: new Date().toISOString(),
-      score: 0
-    }];
+    return webFallbackResult(query, '网页摘要已关闭');
   }
   const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}`;
   const controller = new AbortController();
   let cancelTimer = null;
+  const webTimer = setTimeout(() => controller.abort(), WEB_SUMMARY_TIMEOUT_MS);
   if (searchId) {
     cancelTimer = setInterval(() => {
       if (cancelledSearches.has(String(searchId))) {
@@ -1372,8 +1479,13 @@ async function searchWebResults(query, searchId = '') {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const html = await response.text();
     assertSearchActive(searchId);
-    const results = parseBingResults(html);
+    const results = parseBingResults(html, query);
     if (results.length) return results;
+    return webFallbackResult(
+      query,
+      `网页线索不够明确：${query}`,
+      '网页摘要这次没有找到足够贴合的结果。为了不把跑题内容混进来，先只保留浏览器搜索入口。'
+    );
   } catch (error) {
     if (error?.name === 'AbortError' || cancelledSearches.has(String(searchId))) {
       assertSearchActive(searchId);
@@ -1381,17 +1493,10 @@ async function searchWebResults(query, searchId = '') {
     logLine('web search failed', error.message || String(error));
   } finally {
     if (cancelTimer) clearInterval(cancelTimer);
+    clearTimeout(webTimer);
   }
 
-  return [{
-    id: cryptoId(),
-    type: 'web-fallback',
-    title: `打开浏览器搜索：${query}`,
-    source: getWebUrl(query),
-    content: '没有成功读取到网页结果，点击这里仍可打开浏览器搜索。',
-    createdAt: new Date().toISOString(),
-    score: 0
-  }];
+  return webFallbackResult(query);
 }
 
 async function fetchWebsite(url) {
@@ -1435,6 +1540,7 @@ async function importFile(filePath) {
     source: filePath,
     category: guessCategory({ type: 'file-import', source: filePath, title: path.basename(filePath) }),
     tags: existingIndex >= 0 ? (db.memory[existingIndex].tags || []) : [],
+    note: existingIndex >= 0 ? String(db.memory[existingIndex].note || '') : '',
     content: content.slice(0, 120000),
     createdAt: existingIndex >= 0 ? db.memory[existingIndex].createdAt : new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -1445,6 +1551,95 @@ async function importFile(filePath) {
   db.memory.unshift(item);
   writeDb(db);
   return item;
+}
+
+async function importWithSummary(filePaths, importer, stage, options = {}) {
+  const type = String(options.type || '').trim() || '资料';
+  const summary = {
+    cancelled: false,
+    type,
+    total: filePaths.length,
+    succeeded: 0,
+    failed: 0,
+    imported: [],
+    failures: []
+  };
+
+  emitImportProgress({
+    stage,
+    type,
+    current: 0,
+    total: summary.total,
+    succeeded: 0,
+    failed: 0,
+    currentLabel: summary.total ? '准备开始...' : '没有选择要导入的内容。'
+  });
+
+  for (const [index, filePath] of filePaths.entries()) {
+    try {
+      emitImportProgress({
+        stage,
+        type,
+        current: index + 1,
+        total: summary.total,
+        succeeded: summary.succeeded,
+        failed: summary.failed,
+        currentLabel: `正在处理：${path.basename(filePath || '') || '未命名资料'}`
+      });
+      if (!fs.existsSync(filePath)) {
+        throw new Error('文件不存在或已经被移动。');
+      }
+      const item = await importer(filePath);
+      summary.imported.push(item);
+      summary.succeeded += 1;
+      clearFailure(stage, filePath);
+    } catch (error) {
+      recordFailure(stage, filePath, error);
+      summary.failures.push({
+        path: filePath,
+        title: path.basename(filePath || ''),
+        message: simplifyErrorMessage(error?.message || String(error || '导入失败'))
+      });
+      summary.failed += 1;
+    }
+
+    emitImportProgress({
+      stage,
+      type,
+      current: index + 1,
+      total: summary.total,
+      succeeded: summary.succeeded,
+      failed: summary.failed,
+      currentLabel: summary.total === index + 1
+        ? '正在整理导入结果...'
+        : `已完成 ${index + 1}/${summary.total}，继续处理中...`
+    });
+  }
+
+  emitImportProgress({
+    stage,
+    type,
+    done: true,
+    current: summary.total,
+    total: summary.total,
+    succeeded: summary.succeeded,
+    failed: summary.failed,
+    currentLabel: `处理完成：成功 ${summary.succeeded} 个，失败 ${summary.failed} 个。`
+  });
+
+  return summary;
+}
+
+function cancelledImportSummary() {
+  return {
+    cancelled: true,
+    type: '资料',
+    total: 0,
+    succeeded: 0,
+    failed: 0,
+    imported: [],
+    failures: []
+  };
 }
 
 async function recognizeImageText(filePath) {
@@ -1491,6 +1686,7 @@ async function importImageWithOcr(filePath) {
     source: filePath,
     category: '图片文字',
     tags: existingIndex >= 0 ? (db.memory[existingIndex].tags || []) : ['OCR'],
+    note: existingIndex >= 0 ? String(db.memory[existingIndex].note || '') : '',
     content: text || 'OCR 没有识别到清晰文字。',
     createdAt: existingIndex >= 0 ? db.memory[existingIndex].createdAt : new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -1501,6 +1697,113 @@ async function importImageWithOcr(filePath) {
   db.memory.unshift(item);
   writeDb(db);
   return item;
+}
+
+async function importSiteUrl(url) {
+  let page;
+  try {
+    page = await fetchWebsite(url);
+  } catch (error) {
+    recordFailure('site-import', url, error);
+    throw error;
+  }
+
+  const db = readDb();
+  const existingIndex = db.memory.findIndex((item) => item.source === url);
+  const item = {
+    ...(existingIndex >= 0 ? db.memory[existingIndex] : {}),
+    id: cryptoId(),
+    type: 'website',
+    title: page.title,
+    source: url,
+    category: '网站',
+    tags: existingIndex >= 0 ? (db.memory[existingIndex].tags || []) : [],
+    note: existingIndex >= 0 ? String(db.memory[existingIndex].note || '') : '',
+    content: page.text,
+    createdAt: existingIndex >= 0 ? db.memory[existingIndex].createdAt : new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  if (existingIndex >= 0) {
+    db.memory.splice(existingIndex, 1);
+  }
+  db.memory.unshift(item);
+  writeDb(db);
+  clearFailure('site-import', url);
+  return item;
+}
+
+async function retryFailure(failureId) {
+  const failures = readFailures();
+  const failure = failures.find((item) => item.id === failureId);
+  if (!failure) {
+    throw new Error('没有找到这条失败记录。');
+  }
+
+  if (failure.stage === 'import' || failure.stage === 'import-summary-check') {
+    return importWithSummary([failure.path], importFile, 'import', { type: '文件' });
+  }
+  if (failure.stage === 'ocr') {
+    return importWithSummary([failure.path], importImageWithOcr, 'ocr', { type: '图片 OCR' });
+  }
+  if (failure.stage === 'site-import') {
+    emitImportProgress({
+      stage: 'site-import',
+      type: '网站',
+      current: 1,
+      total: 1,
+      succeeded: 0,
+      failed: 0,
+      currentLabel: '正在重新读取网站内容...'
+    });
+    try {
+      const item = await importSiteUrl(failure.path);
+      emitImportProgress({
+        stage: 'site-import',
+        type: '网站',
+        done: true,
+        current: 1,
+        total: 1,
+        succeeded: 1,
+        failed: 0,
+        currentLabel: '网站重试成功。'
+      });
+      return {
+        cancelled: false,
+        type: '网站',
+        total: 1,
+        succeeded: 1,
+        failed: 0,
+        imported: [item],
+        failures: []
+      };
+    } catch (error) {
+      emitImportProgress({
+        stage: 'site-import',
+        type: '网站',
+        done: true,
+        current: 1,
+        total: 1,
+        succeeded: 0,
+        failed: 1,
+        currentLabel: '网站重试失败。'
+      });
+      return {
+        cancelled: false,
+        type: '网站',
+        total: 1,
+        succeeded: 0,
+        failed: 1,
+        imported: [],
+        failures: [{
+          path: failure.path,
+          title: failure.title || failure.path,
+          message: simplifyErrorMessage(error?.message || String(error || '重试失败'))
+        }]
+      };
+    }
+  }
+
+  throw new Error('这条失败记录暂时不支持重试。');
 }
 
 function writeSelfCheckOcrImage(filePath) {
@@ -1544,6 +1847,7 @@ async function saveResultToMemory(result) {
     source,
     category: /^https?:\/\//i.test(source) ? '网站' : '收藏',
     tags: existingIndex >= 0 ? (db.memory[existingIndex].tags || []) : ['收藏'],
+    note: existingIndex >= 0 ? String(db.memory[existingIndex].note || '') : '',
     content,
     createdAt: existingIndex >= 0 ? db.memory[existingIndex].createdAt : new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -1602,6 +1906,7 @@ async function runSelfCheck() {
   const originalCloudSyncFolder = db.settings.cloudSyncFolder || '';
   const originalCloudSyncLastUploadAt = db.settings.cloudSyncLastUploadAt || '';
   const originalCloudSyncLastImportAt = db.settings.cloudSyncLastImportAt || '';
+  const originalLocalIndex = readLocalIndex();
   let localName = [];
   let contentOnly = [];
   let memoryOnly = [];
@@ -1614,6 +1919,7 @@ async function runSelfCheck() {
   let backupWorks = false;
   let csvExportWorks = false;
   let failureListWorks = false;
+  let importSummaryWorks = false;
   let saveResultWorks = false;
   let cancelSearchWorks = false;
   let dataHealthWorks = false;
@@ -1649,9 +1955,14 @@ async function runSelfCheck() {
     const importedItem = imported[0];
     importedItem.category = '自检';
     importedItem.tags = ['测试', '索引'];
+    importedItem.note = 'DustySearchNoteMarker';
     writeDb(withImport);
     const updated = readDb().memory.find((item) => item.source === workbookPath);
-    memoryMetaWorks = updated?.category === '自检' && updated.tags?.includes('测试');
+    const noteSearch = searchMemory('DustySearchNoteMarker');
+    memoryMetaWorks = updated?.category === '自检'
+      && updated.tags?.includes('测试')
+      && updated.note === 'DustySearchNoteMarker'
+      && noteSearch.some((item) => item.source === workbookPath);
     const xlsxSyntax = await searchFiles('type:xlsx DustySearchUniqueExcelText', 'content');
     const tagSyntax = searchMemory('tag:测试 cat:自检 DustySearchUniqueExcelText');
     syntaxFilterWorks = xlsxSyntax.some((item) => item.path === workbookPath)
@@ -1699,12 +2010,21 @@ async function runSelfCheck() {
     backupWorks = fs.existsSync(path.join(backupPath, 'memory.json'))
       && fs.existsSync(path.join(backupPath, 'backup-info.json'));
     markSelfCheck('backup');
-    csvExportWorks = memoryToCsv(readDb().memory).startsWith('title,source,type,category,tags,createdAt,updatedAt');
+    csvExportWorks = memoryToCsv(readDb().memory).startsWith('title,source,type,category,tags,note,createdAt,updatedAt');
     const brokenDocxPath = path.join(selfCheckDir, 'broken-self-check.docx');
     fs.writeFileSync(brokenDocxPath, 'not a real docx', 'utf8');
     await extractDocumentText(brokenDocxPath);
     failureListWorks = readFailures().some((item) => item.path === brokenDocxPath);
     markSelfCheck('failure-list');
+    const missingImportPath = path.join(selfCheckDir, 'missing-import-check.txt');
+    const importSummary = await importWithSummary([workbookPath, missingImportPath], importFile, 'import-summary-check');
+    importSummaryWorks = importSummary.total === 2
+      && importSummary.succeeded === 1
+      && importSummary.failed === 1
+      && importSummary.imported.some((item) => item.source === workbookPath)
+      && importSummary.failures.some((item) => item.path === missingImportPath)
+      && readFailures().some((item) => item.path === missingImportPath);
+    markSelfCheck('import-summary');
     const cancelCheckId = `self-check-cancel-${Date.now()}`;
     cancelSearch(cancelCheckId);
     try {
@@ -1774,15 +2094,21 @@ async function runSelfCheck() {
     restored.settings.cloudSyncFolder = originalCloudSyncFolder;
     restored.settings.cloudSyncLastUploadAt = originalCloudSyncLastUploadAt;
     restored.settings.cloudSyncLastImportAt = originalCloudSyncLastImportAt;
-    restored.history = (restored.history || []).filter((item) => !looksMojibake(item.query));
+    restored.history = (restored.history || []).filter((item) => isUsefulHistoryQuery(item.query));
     restored.memory = (restored.memory || []).filter((item) => item.source !== workbookPath);
     restored.memory = (restored.memory || []).filter((item) => item.source !== 'https://example.com/dustysearch-saved-result-check');
     restored.memory = (restored.memory || []).filter((item) => item.source !== 'https://example.com/dustysearch-sync-check');
     restored.memory = (restored.memory || []).filter((item) => !String(item.source || '').includes('ocr-self-check'));
     writeDb(restored);
-    writeFailures(readFailures().filter((item) => !String(item.path || '').includes('broken-self-check.docx') && !String(item.path || '').includes('ocr-self-check')));
+    writeFailures(readFailures().filter((item) => !String(item.path || '').includes('broken-self-check.docx')
+      && !String(item.path || '').includes('missing-import-check.txt')
+      && !String(item.path || '').includes('ocr-self-check')));
   }
-  await rebuildLocalIndex();
+  if (originalLocalIndex && isIndexUsable(originalLocalIndex, originalFolders.filter((folder) => folder && fs.existsSync(folder)))) {
+    writeLocalIndex(originalLocalIndex);
+  } else {
+    await rebuildLocalIndex();
+  }
   markSelfCheck('local-index');
   const restoredDb = readDb();
   const localIndex = readLocalIndex();
@@ -1803,6 +2129,7 @@ async function runSelfCheck() {
     backupWorks,
     csvExportWorks,
     failureListWorks,
+    importSummaryWorks,
     saveResultWorks,
     cancelSearchWorks,
     dataHealthWorks,
@@ -1868,7 +2195,11 @@ ipcMain.handle('search:all', async (_event, query) => {
     const [local, memory, web] = await Promise.all([
       searchLocal(cleanQuery, searchId),
       Promise.resolve(searchMemory(cleanQuery, searchId)),
-      searchWebResults(cleanQuery, searchId)
+      withTimeout(
+        searchWebResults(cleanQuery, searchId),
+        WEB_SUMMARY_TIMEOUT_MS,
+        webFallbackResult(cleanQuery, '网页摘要读取较慢')
+      )
     ]);
     assertSearchActive(searchId);
     saveHistory(cleanQuery, 'all', local.length + memory.length + web.length);
@@ -2005,12 +2336,8 @@ ipcMain.handle('file:pickImport', async () => {
       { name: '全部文件', extensions: ['*'] }
     ]
   });
-  if (result.canceled) return [];
-  const imported = [];
-  for (const filePath of result.filePaths) {
-    imported.push(await importFile(filePath));
-  }
-  return imported;
+  if (result.canceled) return { ...cancelledImportSummary(), type: '文件' };
+  return importWithSummary(result.filePaths, importFile, 'import', { type: '文件' });
 });
 
 ipcMain.handle('file:pickOcrImport', async () => {
@@ -2021,38 +2348,60 @@ ipcMain.handle('file:pickOcrImport', async () => {
       { name: '全部文件', extensions: ['*'] }
     ]
   });
-  if (result.canceled) return [];
-  const imported = [];
-  for (const filePath of result.filePaths) {
-    imported.push(await importImageWithOcr(filePath));
-  }
-  return imported;
+  if (result.canceled) return { ...cancelledImportSummary(), type: '图片 OCR' };
+  return importWithSummary(result.filePaths, importImageWithOcr, 'ocr', { type: '图片 OCR' });
 });
 
 ipcMain.handle('site:import', async (_event, rawUrl) => {
   const url = String(rawUrl || '').trim();
   if (!/^https?:\/\//i.test(url)) throw new Error('请输入 http 或 https 开头的网址');
-  const page = await fetchWebsite(url);
-  const db = readDb();
-  const existingIndex = db.memory.findIndex((item) => item.source === url);
-  const item = {
-    ...(existingIndex >= 0 ? db.memory[existingIndex] : {}),
-    id: cryptoId(),
-    type: 'website',
-    title: page.title,
-    source: url,
-    category: '网站',
-    tags: existingIndex >= 0 ? (db.memory[existingIndex].tags || []) : [],
-    content: page.text,
-    createdAt: existingIndex >= 0 ? db.memory[existingIndex].createdAt : new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-  if (existingIndex >= 0) {
-    db.memory.splice(existingIndex, 1);
+  emitImportProgress({
+    stage: 'site-import',
+    type: '网站',
+    current: 1,
+    total: 1,
+    succeeded: 0,
+    failed: 0,
+    currentLabel: '正在读取网站内容...'
+  });
+  try {
+    const item = await importSiteUrl(url);
+    emitImportProgress({
+      stage: 'site-import',
+      type: '网站',
+      done: true,
+      current: 1,
+      total: 1,
+      succeeded: 1,
+      failed: 0,
+      currentLabel: '网站导入完成。'
+    });
+    return item;
+  } catch (error) {
+    emitImportProgress({
+      stage: 'site-import',
+      type: '网站',
+      done: true,
+      current: 1,
+      total: 1,
+      succeeded: 0,
+      failed: 1,
+      currentLabel: '网站导入失败。'
+    });
+    throw error;
   }
-  db.memory.unshift(item);
-  writeDb(db);
-  return item;
+});
+
+ipcMain.handle('failure:retry', async (_event, failureId) => {
+  return retryFailure(String(failureId || ''));
+});
+
+ipcMain.on('import:subscribe', (event) => {
+  importProgressSubscribers.add(event.sender);
+});
+
+ipcMain.on('import:unsubscribe', (event) => {
+  importProgressSubscribers.delete(event.sender);
 });
 
 ipcMain.handle('settings:save', (_event, settings) => {
@@ -2140,6 +2489,7 @@ ipcMain.handle('memory:updateMeta', (_event, payload) => {
     .map((tag) => tag.trim())
     .filter(Boolean)
     .slice(0, 12);
+  item.note = String(payload.note || '').trim().slice(0, 2000);
   item.updatedAt = new Date().toISOString();
   writeDb(db);
   return db.memory;

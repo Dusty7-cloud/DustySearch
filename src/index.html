@@ -39,17 +39,33 @@
 
           <section id="homePulse" class="home-pulse" aria-label="软件状态"></section>
 
-          <div class="search-box split-search">
-            <input id="queryInput" type="search" placeholder="输入关键词，比如：准考证、课程、type:pdf、tag:项目" title="Ctrl+K" />
-            <button id="searchAllButton">综合检索</button>
-          </div>
+          <section class="search-command-panel">
+            <div class="search-box split-search">
+              <input id="queryInput" type="search" placeholder="输入关键词，比如：准考证、课程、type:pdf、tag:项目" title="Ctrl+K" />
+              <button id="searchAllButton">综合检索</button>
+            </div>
+            <div class="search-command-help">
+              <strong>不知道选哪个时，直接用综合检索。</strong>
+              <span>它会同时看文件名、正文、记忆库和少量网页摘要。</span>
+            </div>
+          </section>
 
-          <div class="mode-buttons">
-            <button class="mode-button" data-mode="local">本地文件名</button>
-            <button class="mode-button" data-mode="content">正文检索</button>
-            <button class="mode-button" data-mode="memory">记忆库</button>
-            <button class="mode-button" data-mode="web">网页摘要</button>
-            <button class="mode-button secondary-mode" data-mode="open-web">浏览器搜索</button>
+          <div class="mode-area">
+            <div class="mode-group">
+              <span>只搜本机</span>
+              <div class="mode-buttons local-mode-buttons">
+                <button class="mode-button" data-mode="local">文件名</button>
+                <button class="mode-button" data-mode="content">正文</button>
+                <button class="mode-button" data-mode="memory">记忆库</button>
+              </div>
+            </div>
+            <div class="mode-group web-mode-group">
+              <span>需要联网时</span>
+              <div class="mode-buttons web-mode-buttons">
+                <button class="mode-button" data-mode="web">网页摘要</button>
+                <button class="mode-button secondary-mode" data-mode="open-web">浏览器搜索</button>
+              </div>
+            </div>
           </div>
           <p class="search-hint">网页摘要会在软件里显示少量网页匹配；浏览器搜索会直接打开浏览器结果页。</p>
           <div class="query-tools">
@@ -81,7 +97,7 @@
             <button id="stopSearch" class="small-button danger-button" disabled>停止检索</button>
           </div>
 
-          <section class="quick-start">
+          <section id="quickStartPanel" class="quick-start">
             <div>
               <h2>快速开始</h2>
               <p>第一次用时，先确认资料夹，再试一次文件名检索，重要资料可以导入记忆库。</p>
@@ -94,7 +110,7 @@
           </section>
 
           <div class="content-grid">
-            <section class="panel results-panel">
+            <section id="resultsPanel" class="panel results-panel">
               <div class="panel-head">
                 <h2 id="resultsTitle">匹配结果</h2>
                 <span id="resultCount">0 条</span>
@@ -113,13 +129,23 @@
               <div id="resultsList" class="list empty">输入关键词后，选择一个检索按钮。</div>
             </section>
 
-            <section class="panel history-panel">
-              <div class="panel-head">
-                <h2>检索历史</h2>
-                <button id="clearHistory" class="small-button">清空</button>
-              </div>
-              <div id="historyList" class="history-list empty">还没有记录。</div>
-            </section>
+            <aside class="search-side-stack">
+              <section class="panel result-preview-panel">
+                <div class="panel-head">
+                  <h2>结果预览</h2>
+                  <span id="resultPreviewHint">未选择</span>
+                </div>
+                <div id="resultPreview" class="result-preview empty">点一下左边的结果，这里会显示详情和收藏入口。</div>
+              </section>
+
+              <section class="panel history-panel">
+                <div class="panel-head">
+                  <h2>检索历史</h2>
+                  <button id="clearHistory" class="small-button">清空</button>
+                </div>
+                <div id="historyList" class="history-list empty">还没有记录。</div>
+              </section>
+            </aside>
           </div>
         </section>
 
@@ -175,26 +201,56 @@
               <p>把常用文件或网页放进记忆库，之后可以单独按“记忆库”检索。</p>
             </div>
           </header>
+          <div class="import-flow">
+            <div>
+              <span>1</span>
+              <strong>选择来源</strong>
+              <small>文件、图片或网站</small>
+            </div>
+            <div>
+              <span>2</span>
+              <strong>自动处理</strong>
+              <small>提取文字并保存</small>
+            </div>
+            <div>
+              <span>3</span>
+              <strong>去记忆库使用</strong>
+              <small>之后可单独检索</small>
+            </div>
+          </div>
           <div class="import-grid">
             <div class="panel import-panel">
+              <span class="import-panel-kicker">适合资料文件</span>
               <h2>导入文件</h2>
               <p>支持 txt、md、pdf、docx、xlsx、csv、网页文件等常见资料。</p>
+              <small>常用讲义、证件、表格、笔记优先用这个。</small>
               <button id="importFiles">选择文件导入</button>
             </div>
             <div class="panel import-panel">
+              <span class="import-panel-kicker">适合截图照片</span>
               <h2>图片 OCR</h2>
               <p>选择截图、照片或扫描图片，识别里面的文字并保存到记忆库。</p>
+              <small>图片越清晰，识别越稳。第一次可能慢一点。</small>
               <button id="importOcrImages">选择图片识别</button>
             </div>
             <div class="panel import-panel">
+              <span class="import-panel-kicker">适合网页文章</span>
               <h2>导入网站</h2>
               <p>粘贴网址，软件会读取网页文字，保存到记忆库里。</p>
+              <small>网页限制较多，失败时可以稍后重试或用浏览器打开。</small>
               <div class="inline-form">
                 <input id="siteUrl" type="url" placeholder="https://example.com" />
                 <button id="importSite">导入</button>
               </div>
             </div>
           </div>
+          <section class="panel import-feedback-panel">
+            <div class="panel-head">
+              <h2>导入结果</h2>
+              <span id="importFeedbackStatus">等待导入</span>
+            </div>
+            <div id="importFeedback" class="import-feedback empty">导入文件、图片或网站后，这里会显示成功数量、失败数量和下一步入口。</div>
+          </section>
         </section>
 
         <section id="tab-settings" class="tab-panel">
@@ -232,132 +288,177 @@
               <p id="workspaceHint" class="data-tool-note">当前资料夹组合可以保存成资料区。</p>
             </section>
             <section class="panel settings-form">
-              <label>
-                每次最多显示
-                <input id="maxResults" type="number" min="10" max="300" step="10" />
-              </label>
-              <label class="checkline">
-                <input id="includeContent" type="checkbox" />
-                正文检索时读取文本、PDF、Word、Excel 内容
-              </label>
-              <label>
-                默认联网搜索
-                <select id="webEngine">
-                  <option value="bing">Bing</option>
-                  <option value="google">Google</option>
-                  <option value="duckduckgo">DuckDuckGo</option>
-                </select>
-              </label>
-              <button id="saveSettings">保存设置</button>
+              <div class="settings-form-head">
+                <h2>基础设置</h2>
+                <span>改完这里后，点右侧保存。</span>
+              </div>
+              <div class="settings-field-row">
+                <label>
+                  每次最多显示
+                  <input id="maxResults" type="number" min="10" max="300" step="10" />
+                </label>
+                <label>
+                  默认联网搜索
+                  <select id="webEngine">
+                    <option value="bing">Bing</option>
+                    <option value="google">Google</option>
+                    <option value="duckduckgo">DuckDuckGo</option>
+                  </select>
+                </label>
+                <label class="checkline">
+                  <input id="includeContent" type="checkbox" />
+                  正文检索时读取文本、PDF、Word、Excel 内容
+                </label>
+              </div>
+              <div class="settings-save-row">
+                <span id="settingsSaveHint">保存后会立即用于下一次检索。</span>
+                <button id="saveSettings">保存设置</button>
+              </div>
             </section>
           </div>
 
-          <section class="panel data-tools">
-            <div class="panel-head">
+          <div class="settings-advanced">
+          <details class="panel data-tools settings-section">
+            <summary class="settings-section-summary">
               <div>
                 <h2>上手引导</h2>
                 <span>需要重新看一遍软件怎么用时，可以从这里打开。</span>
               </div>
+              <span class="section-state"></span>
+            </summary>
+            <div class="settings-section-body settings-single-action">
               <button id="showOnboarding" class="small-button">重新打开引导</button>
             </div>
-          </section>
+          </details>
 
-          <section class="panel data-tools privacy-panel">
-            <div class="panel-head">
+          <details class="panel data-tools settings-section privacy-panel">
+            <summary class="settings-section-summary">
               <div>
                 <h2>隐私和痕迹</h2>
                 <span>控制哪些内容会联网、会保存记录、会留在本机缓存里。</span>
               </div>
+              <span class="section-state"></span>
+            </summary>
+            <div class="settings-section-body">
+              <div class="privacy-options">
+                <label class="checkline">
+                  <input id="saveHistory" type="checkbox" />
+                  保存检索历史
+                </label>
+                <label class="checkline">
+                  <input id="allowWebSummary" type="checkbox" />
+                  允许“网页摘要”联网读取少量搜索结果
+                </label>
+                <label class="checkline">
+                  <input id="cacheDocumentText" type="checkbox" />
+                  缓存 PDF、Word、Excel 正文，提升下次检索速度
+                </label>
+              </div>
+              <div class="data-tool-grid privacy-actions">
+                <button id="clearPrivacyHistory" class="small-button">清空检索历史</button>
+                <button id="clearPrivacyFailures" class="small-button">清空读取失败记录</button>
+                <button id="clearDocumentCache" class="small-button danger-button">清理正文缓存</button>
+              </div>
+              <p class="data-tool-note">关闭网页摘要后，浏览器搜索仍可用；关闭正文缓存后，复杂文件每次正文检索会更慢，但本机少留一份正文索引。</p>
             </div>
-            <div class="privacy-options">
-              <label class="checkline">
-                <input id="saveHistory" type="checkbox" />
-                保存检索历史
-              </label>
-              <label class="checkline">
-                <input id="allowWebSummary" type="checkbox" />
-                允许“网页摘要”联网读取少量搜索结果
-              </label>
-              <label class="checkline">
-                <input id="cacheDocumentText" type="checkbox" />
-                缓存 PDF、Word、Excel 正文，提升下次检索速度
-              </label>
-            </div>
-            <div class="data-tool-grid privacy-actions">
-              <button id="clearPrivacyHistory" class="small-button">清空检索历史</button>
-              <button id="clearPrivacyFailures" class="small-button">清空读取失败记录</button>
-              <button id="clearDocumentCache" class="small-button danger-button">清理正文缓存</button>
-            </div>
-            <p class="data-tool-note">关闭网页摘要后，浏览器搜索仍可用；关闭正文缓存后，复杂文件每次正文检索会更慢，但本机少留一份正文索引。</p>
-          </section>
+          </details>
 
-          <section class="panel data-tools data-health-panel">
-            <div class="panel-head">
+          <details class="panel data-tools settings-section data-health-panel" open>
+            <summary class="settings-section-summary">
               <div>
                 <h2>资料体检</h2>
                 <span>检查资料夹、索引、记忆库、备份和读取失败。</span>
               </div>
-              <button id="refreshDataHealth" class="small-button">刷新体检</button>
+              <span class="section-state"></span>
+            </summary>
+            <div class="settings-section-body">
+              <div class="settings-section-actions">
+                <button id="refreshDataHealth" class="small-button">刷新体检</button>
+              </div>
+              <div id="dataHealth" class="data-health">
+                <div class="health-empty">正在准备体检报告...</div>
+              </div>
             </div>
-            <div id="dataHealth" class="data-health">
-              <div class="health-empty">正在准备体检报告...</div>
-            </div>
-          </section>
+          </details>
 
-          <section class="panel data-tools">
-            <div class="panel-head">
-              <h2>软件信息</h2>
+          <details class="panel data-tools settings-section">
+            <summary class="settings-section-summary">
+              <div>
+                <h2>软件信息</h2>
+                <span>查看安装位置、数据位置和一键自检入口。</span>
+              </div>
+              <span class="section-state"></span>
+            </summary>
+            <div class="settings-section-body">
+              <div id="appInfoList" class="info-list"></div>
+              <div class="data-tool-grid">
+                <button id="openInstallDir" class="small-button">打开安装位置</button>
+                <button id="openInstallNote" class="small-button">打开安装说明</button>
+                <button id="runSelfCheckTool" class="small-button">运行一键自检</button>
+                <button id="openDataDir" class="small-button">打开数据位置</button>
+              </div>
+              <p class="data-tool-note">这里用来确认当前打开的是桌面安装版，数据继续保存在文档里的 DustySearchData。</p>
             </div>
-            <div id="appInfoList" class="info-list"></div>
-            <div class="data-tool-grid">
-              <button id="openInstallDir" class="small-button">打开安装位置</button>
-              <button id="openInstallNote" class="small-button">打开安装说明</button>
-              <button id="runSelfCheckTool" class="small-button">运行一键自检</button>
-              <button id="openDataDir" class="small-button">打开数据位置</button>
-            </div>
-            <p class="data-tool-note">这里用来确认当前打开的是桌面安装版，数据继续保存在文档里的 DustySearchData。</p>
-          </section>
+          </details>
 
-          <section class="panel data-tools">
-            <div class="panel-head">
-              <h2>数据备份和导出</h2>
+          <details class="panel data-tools settings-section">
+            <summary class="settings-section-summary">
+              <div>
+                <h2>数据备份和导出</h2>
+                <span>备份、恢复或导出记忆库资料。</span>
+              </div>
+              <span class="section-state"></span>
+            </summary>
+            <div class="settings-section-body">
+              <div class="data-tool-grid">
+                <button id="createBackup" class="small-button">一键备份</button>
+                <button id="restoreBackup" class="small-button danger-button">恢复备份</button>
+                <button id="exportMemoryJson" class="small-button">导出 JSON</button>
+                <button id="exportMemoryCsv" class="small-button">导出 CSV</button>
+              </div>
+              <p class="data-tool-note">恢复会先自动备份当前数据，再覆盖为你选择的备份。</p>
             </div>
-            <div class="data-tool-grid">
-              <button id="createBackup" class="small-button">一键备份</button>
-              <button id="restoreBackup" class="small-button danger-button">恢复备份</button>
-              <button id="exportMemoryJson" class="small-button">导出 JSON</button>
-              <button id="exportMemoryCsv" class="small-button">导出 CSV</button>
-            </div>
-            <p class="data-tool-note">恢复会先自动备份当前数据，再覆盖为你选择的备份。</p>
-          </section>
+          </details>
 
-          <section class="panel data-tools cloud-sync-panel">
-            <div class="panel-head">
+          <details class="panel data-tools settings-section cloud-sync-panel">
+            <summary class="settings-section-summary">
               <div>
                 <h2>云同步</h2>
                 <span>选择一个 OneDrive、网盘或 U 盘同步文件夹，上传和合并记忆库。</span>
               </div>
+              <span class="section-state"></span>
+            </summary>
+            <div class="settings-section-body">
+              <div id="cloudSyncStatus" class="cloud-sync-status"></div>
+              <div class="data-tool-grid cloud-actions">
+                <button id="pickCloudSyncFolder" class="small-button">选择同步文件夹</button>
+                <button id="openCloudSyncFolder" class="small-button">打开同步文件夹</button>
+                <button id="uploadCloudSync" class="small-button">上传到云同步</button>
+                <button id="importCloudSync" class="small-button">从云同步合并</button>
+                <button id="exportSyncPackage" class="small-button">另存同步包</button>
+                <button id="importSyncPackage" class="small-button">导入同步包</button>
+                <button id="clearCloudSyncFolder" class="small-button danger-button">取消云同步文件夹</button>
+              </div>
+              <p class="data-tool-note">云同步不会登录账号；它使用你已经同步到云端的本地文件夹。合并前会自动备份当前数据。</p>
             </div>
-            <div id="cloudSyncStatus" class="cloud-sync-status"></div>
-            <div class="data-tool-grid cloud-actions">
-              <button id="pickCloudSyncFolder" class="small-button">选择同步文件夹</button>
-              <button id="openCloudSyncFolder" class="small-button">打开同步文件夹</button>
-              <button id="uploadCloudSync" class="small-button">上传到云同步</button>
-              <button id="importCloudSync" class="small-button">从云同步合并</button>
-              <button id="exportSyncPackage" class="small-button">另存同步包</button>
-              <button id="importSyncPackage" class="small-button">导入同步包</button>
-              <button id="clearCloudSyncFolder" class="small-button danger-button">取消云同步文件夹</button>
-            </div>
-            <p class="data-tool-note">云同步不会登录账号；它使用你已经同步到云端的本地文件夹。合并前会自动备份当前数据。</p>
-          </section>
+          </details>
 
-          <section class="panel data-tools">
-            <div class="panel-head">
-              <h2 id="failureTitle">读取失败列表</h2>
-              <button id="clearFailures" class="small-button">清空</button>
+          <details id="failureSection" class="panel data-tools settings-section">
+            <summary class="settings-section-summary">
+              <div>
+                <h2 id="failureTitle">读取失败列表</h2>
+                <span>查看哪些文件暂时读不了。</span>
+              </div>
+              <span class="section-state"></span>
+            </summary>
+            <div class="settings-section-body">
+              <div class="settings-section-actions">
+                <button id="clearFailures" class="small-button">清空</button>
+              </div>
+              <div id="failureList" class="failure-list empty">暂时没有读取失败记录。</div>
             </div>
-            <div id="failureList" class="failure-list empty">暂时没有读取失败记录。</div>
-          </section>
+          </details>
+          </div>
         </section>
       </main>
     </div>
